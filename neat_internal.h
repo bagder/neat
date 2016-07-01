@@ -228,6 +228,25 @@ struct neat_resolver_res {
     LIST_ENTRY(neat_resolver_res) next_res;
 };
 
+// Linked list passed to HE after the first PM call.
+// The list contains each candidate HE should get resolved.
+struct neat_he_candidate {
+    const char *dst_address;
+    char       *src_address;
+    int32_t     stack;
+    uint8_t     family;
+    uint16_t    port;
+    uint32_t    if_idx;
+    char       *if_name;
+
+    struct sockaddr_storage saddr;
+    socklen_t               slen;
+
+    LIST_ENTRY(neat_he_candidate) next;
+};
+
+LIST_HEAD(neat_he_candidates, neat_he_candidate);
+
 // Connect context needed during HE.
 struct he_cb_ctx {
     uv_poll_t *handle;
