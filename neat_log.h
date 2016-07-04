@@ -11,6 +11,10 @@
 
 #define NEAT_LOG_STDERR 0
 
+#define NEAT_FUNC_TRACE() do {\
+    neat_log(NEAT_LOG_DEBUG, "%s", __func__);\
+} while(0);
+
 uint8_t neat_log_init();
 void neat_log(uint8_t level, const char* format, ...);
 void neat_log_usrsctp(const char* format, ...);
