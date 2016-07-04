@@ -15,7 +15,7 @@
 
 #ifdef ENABLE_WRITE
 uv_buf_t buf[1];
-static const char* test_string = "{}";
+static const char* test_string = "{\"MTU\": {\"value\": [1500, Infinity]}, \"low_latency\": {\"precedence\": 2, \"value\": true}, \"remote_ip\": {\"precedence\": 2, \"value\": \"10.1.23.45\"}, \"transport_TCP\": {\"value\": true}}";
 #endif
 
 static void neat_pm_socket_close(struct neat_ctx *ctx, struct neat_flow *flow, uv_stream_t *handle);
@@ -140,7 +140,7 @@ neat_pm_socket_connect(neat_ctx *ctx, neat_flow *flow, pm_callback cb)
             return NEAT_ERROR_INTERNAL;
         }
 
-        if (snprintf(buffer, 128, "/home/%s/.neat/neat_pm_socket", getenv("USER")) < 0) {
+        if (snprintf(buffer, 128, "%s/.neat/neat_pm_socket", getenv("HOME")) < 0) {
             neat_log(NEAT_LOG_DEBUG, "Unable to construct default path to PM socket");
             return NEAT_ERROR_INTERNAL;
         }
