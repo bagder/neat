@@ -9,6 +9,7 @@ SET(CMAKE_MACOSX_RPATH 1)
 #################################################
 LIST(APPEND neat_headers
     neat.h
+    neat_pm_socket.h
     neat_queue.h
 )
 
@@ -18,6 +19,7 @@ LIST(APPEND neat_sources
     neat_he.c
     neat_log.c
     neat_stat.c
+    neat_pm_socket.c
     neat_property_helpers.c
     neat_resolver.c
     neat_resolver_conf.c

@@ -21,6 +21,7 @@
 #endif
 
 #include "neat_log.h"
+#include "neat_pm_socket.h"
 
 #define NEAT_INTERNAL_CTX \
     void (*cleanup)(struct neat_ctx *nc); \
@@ -135,6 +136,8 @@ struct neat_flow
     size_t readBufferSize;        // amount of received data
     size_t readBufferAllocation;  // size of buffered allocation
     int readBufferMsgComplete;    // it contains a complete user message
+
+    struct neat_pm_context *pm_context;
 
     neat_read_impl readfx;
     neat_write_impl writefx;

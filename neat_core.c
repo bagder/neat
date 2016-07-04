@@ -1192,11 +1192,37 @@ static void do_accept(neat_ctx *ctx, neat_flow *flow)
     }
 }
 
+
+static void
+on_pm_reply(neat_ctx *ctx, neat_flow *flow, json_t *json)
+{
+    NEAT_FUNC_TRACE();
+
+    char *str = json_dumps(json, 0);
+    neat_log(NEAT_LOG_DEBUG, "Reply from PM was: %s", str);
+    free(str);
+
+    json_decref(json);
+}
+
+static void
+on_pm_timeout()
+{
+    // TODO: Wire up and implement
+}
+
+static void
+on_pm_connected_cb(neat_ctx *ctx, neat_flow *flow)
+{
+    NEAT_FUNC_TRACE();
+
+    neat_pm_send(ctx, flow, on_pm_reply);
+}
+
 neat_error_code
 neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port)
 {
     neat_log(NEAT_LOG_DEBUG, "%s", __func__);
-
 
     if (flow->name) {
         return NEAT_ERROR_BAD_ARGUMENT;
@@ -1207,7 +1233,10 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port)
     flow->propertyAttempt = flow->propertyMask;
     flow->stream_count = 1;
 
-    return neat_he_lookup(mgr, flow, he_connected_cb);
+    neat_pm_socket_connect(mgr, flow, on_pm_connected_cb);
+
+    // return neat_he_lookup(mgr, flow, he_connected_cb);
+    return NEAT_OK;
 }
 
 neat_error_code
