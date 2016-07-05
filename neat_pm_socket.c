@@ -92,6 +92,13 @@ on_pm_connected(uv_connect_t* req, int status)
 
     if (status < 0) {
         neat_log(NEAT_LOG_DEBUG, "Failed to connect to PM socket");
+
+        /* Exit early if the PM is not running in order to prevent stalling the
+         * buildbot tests.
+         * TODO: Remove once the buildbots are running the PM.
+         */
+        exit(-1);
+
         goto error;
     }
 
