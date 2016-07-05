@@ -11,6 +11,7 @@ LIST(APPEND neat_headers
     neat.h
     neat_pm_socket.h
     neat_queue.h
+    neat_json_helpers.h
 )
 
 LIST(APPEND neat_sources
@@ -21,6 +22,7 @@ LIST(APPEND neat_sources
     neat_stat.c
     neat_pm_socket.c
     neat_property_helpers.c
+    neat_json_helpers.c
     neat_resolver.c
     neat_resolver_conf.c
 )
