@@ -298,7 +298,7 @@ class PropertyDict(dict):
         try:
             request_properties = json.loads(json_str)
         except json.decoder.JSONDecodeError:
-            logging.error('invalid JSON string')
+            logging.error('invalid JSON string: ' + json_str)
             return
         self.insert_dict(request_properties)
 
@@ -317,13 +317,17 @@ class PropertyDict(dict):
         # TODO sort by score
         return property_list
 
-    def json_old(self, indent=None, with_score=True):
-        """deprecated"""
-        plist = [i for i in self.list]
-        return json.dumps(plist, sort_keys=True, indent=indent)
-
-    def json(self, indent=None, with_score=True):
-        return json.dumps(self.dict, sort_keys=True, indent=indent)
+    def json(self, indent=None, with_score=False):
+        json_dict = copy.deepcopy(self.dict)
+        # delete any NaN scores from JSON
+        if not with_score:
+            for k, v in json_dict.items():
+                if math.isnan(v.get('score', math.nan)):
+                    try:
+                        del v['score']
+                    except KeyError:
+                        pass
+        return json.dumps(json_dict, sort_keys=True, indent=indent)
 
     def __repr__(self):
         return '{' + ', '.join([str(i) for i in self.values()]) + '}'
