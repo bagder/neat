@@ -112,7 +112,7 @@ neat_error_code
 neat_pm_socket_connect(neat_ctx *ctx, neat_flow *flow, pm_callback cb)
 {
     const char *socket_path;
-    const char *username;
+    const char *home_dir;
     char buffer[128];
 
     NEAT_FUNC_TRACE();
@@ -135,12 +135,12 @@ neat_pm_socket_connect(neat_ctx *ctx, neat_flow *flow, pm_callback cb)
 
     socket_path = getenv("NEAT_PM_SOCKET");
     if (!socket_path) {
-        if ((username = getenv("USER")) == NULL) {
-            neat_log(NEAT_LOG_DEBUG, "Unable to determine username");
+        if ((home_dir = getenv("HOME")) == NULL) {
+            neat_log(NEAT_LOG_DEBUG, "Unable to locate the $HOME directory");
             return NEAT_ERROR_INTERNAL;
         }
 
-        if (snprintf(buffer, 128, "%s/.neat/neat_pm_socket", getenv("HOME")) < 0) {
+        if (snprintf(buffer, 128, "%s/.neat/neat_pm_socket", home_dir) < 0) {
             neat_log(NEAT_LOG_DEBUG, "Unable to construct default path to PM socket");
             return NEAT_ERROR_INTERNAL;
         }
