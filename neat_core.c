@@ -27,6 +27,7 @@
 #include "neat_queue.h"
 #include "neat_property_helpers.h"
 #include "neat_stat.h"
+#include "neat_json_helpers.h"
 
 #if defined(USRSCTP_SUPPORT)
     #include "neat_usrsctp_internal.h"
@@ -1192,6 +1193,78 @@ static void do_accept(neat_ctx *ctx, neat_flow *flow)
     }
 }
 
+static void
+build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json)
+{
+    size_t i, stack_count, candidate = 0;
+    neat_protocol_stack_type stacks[NEAT_MAX_NUM_PROTO];
+    json_t *value;
+
+    NEAT_FUNC_TRACE();
+
+    /* This is only an initial implementation. I expect this to change once the
+     * protocol between PM and NEAT logic evolves
+     */
+    json_array_foreach(json, i, value) {
+        neat_log(NEAT_LOG_DEBUG, "Now processing PM candidate %zu", i);
+        json_t *obj;
+        const char *interface = NULL, *remote_ip = NULL, *local_ip = NULL;
+
+#if 0
+        // TODO: In the future, we should require to have an interface speficied
+        // at this point
+        obj = json_object_get(json, "interface");
+        if (!obj) {
+            neat_log(NEAT_LOG_DEBUG, "PM candidate %d specifies no interface, ignoring");
+            continue;
+        }
+
+        interface = json_string_value(json_object_get(obj, "value"));
+#else
+        obj = json_object_get(value, "interface");
+        if (obj)
+            interface = json_string_value(json_object_get(obj, "value"));
+        else
+            interface = "(unspecified)";
+#endif
+
+        obj = json_object_get(value, "remote_ip");
+        if (obj)
+            remote_ip = json_string_value(json_object_get(obj, "value"));
+        else
+            remote_ip = "(unspecified)";
+
+        obj = json_object_get(value, "local_ip");
+        if (obj)
+            local_ip = json_string_value(json_object_get(obj, "value"));
+        else
+            local_ip = "(unspecified)";
+
+        stack_count = NEAT_MAX_NUM_PROTO;
+        find_enabled_protocols(value, stacks, &stack_count);
+
+        if (stack_count == 0) {
+            neat_log(NEAT_LOG_DEBUG, "PM Candidate %d specifies no transport protocol, ignoring");
+            continue;
+        }
+
+        for (size_t j = 0; j < stack_count; j++) {
+            char *str = json_dumps(value, JSON_INDENT(2));
+
+            neat_log(NEAT_LOG_DEBUG, "HE Candidate %zu", candidate++);
+            neat_log(NEAT_LOG_DEBUG, "Transport:   %d", stacks[j]);
+            neat_log(NEAT_LOG_DEBUG, "Interface:   %s", interface);
+            neat_log(NEAT_LOG_DEBUG, "Src:         %s", local_ip);
+            neat_log(NEAT_LOG_DEBUG, "Dst:         %s", remote_ip);
+            neat_log(NEAT_LOG_DEBUG, "Properties:\n%s", str);
+
+            free(str);
+
+            // TODO: Append candidate to linked list that will be sent to HE
+        }
+    }
+}
+
 
 static void
 on_pm_reply(neat_ctx *ctx, neat_flow *flow, json_t *json)
@@ -1201,6 +1274,8 @@ on_pm_reply(neat_ctx *ctx, neat_flow *flow, json_t *json)
     char *str = json_dumps(json, 0);
     neat_log(NEAT_LOG_DEBUG, "Reply from PM was: %s", str);
     free(str);
+
+    build_he_candidates(ctx, flow, json);
 
     json_decref(json);
 }
