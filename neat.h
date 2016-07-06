@@ -103,6 +103,8 @@ neat_error_code neat_get_property(struct neat_ctx *ctx, struct neat_flow *flow,
                                   uint64_t *outMask);
 neat_error_code neat_set_property(struct neat_ctx *ctx, struct neat_flow *flow,
                                   uint64_t inMask);
+neat_error_code neat_set_property_json(struct neat_ctx *ctx, struct neat_flow *flow,
+                                       const char *properties);
 neat_error_code neat_accept(struct neat_ctx *ctx, struct neat_flow *flow,
                             const char *name, uint16_t port);
 neat_error_code neat_shutdown(struct neat_ctx *ctx, struct neat_flow *flow);

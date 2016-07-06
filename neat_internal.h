@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <uv.h>
+#include <jansson.h>
 
 #include "neat.h"
 #include "neat_queue.h"
@@ -138,6 +139,8 @@ struct neat_flow
     int readBufferMsgComplete;    // it contains a complete user message
 
     struct neat_pm_context *pm_context;
+
+    json_t *properties;
 
     neat_read_impl readfx;
     neat_write_impl writefx;

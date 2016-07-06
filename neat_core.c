@@ -386,6 +386,48 @@ neat_error_code neat_set_property(neat_ctx *mgr, neat_flow *flow,
     return NEAT_OK;
 }
 
+neat_error_code
+neat_set_property_json(neat_ctx *mgr, neat_flow *flow, const char *properties)
+{
+    json_t *props;
+    json_error_t error;
+    char *buffer;
+
+    NEAT_FUNC_TRACE();
+
+    props = json_loads(properties, 0, &error);
+    if (props == NULL) {
+        neat_log(NEAT_LOG_DEBUG, "Error in property string, line %d col %d",
+                 error.line, error.position);
+        neat_log(NEAT_LOG_DEBUG, "%s", error.text);
+
+        return NEAT_ERROR_BAD_ARGUMENT;
+    }
+
+    if (flow->properties == NULL) {
+        flow->properties = props;
+    } else {
+        const char *key;
+        json_t *prop;
+        neat_log(NEAT_LOG_DEBUG, "Overwriting with new properties...");
+        json_object_foreach(props, key, prop) {
+
+            // This step is not strictly required, but informs of overwritten keys
+            if (json_object_del(flow->properties, key) == 0) {
+                neat_log(NEAT_LOG_DEBUG, "Existing property %s was overwritten!", key);
+            }
+
+            json_object_set(flow->properties, key, prop);
+        }
+    }
+
+    buffer = json_dumps(flow->properties, JSON_INDENT(2));
+    neat_log(NEAT_LOG_DEBUG, "Flow properties are now:\n%s\n", buffer);
+    free(buffer);
+
+    return NEAT_OK;
+}
+
 int neat_get_stack(neat_ctx* mgr, neat_flow* flow)
 {
     return flow->sockStack;
