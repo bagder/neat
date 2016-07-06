@@ -1,0 +1,10 @@
+{
+   "transport_UDP" : {
+      "value" : false,
+      "precedence" : 2
+   },
+   "transport_UDPlite" : {
+      "value" : false,
+      "precedence" : 2
+   }
+}
