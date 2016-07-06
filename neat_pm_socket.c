@@ -9,13 +9,16 @@
 #include <assert.h>
 
 #define ENABLE_WRITE
+// #define USE_TEST_STRING
 
 // Uncomment this to read a single reply only from the PM
 #define READ_ONCE
 
 #ifdef ENABLE_WRITE
 uv_buf_t buf[1];
+#if defined(USE_TEST_STRING)
 static const char* test_string = "{\"MTU\": {\"value\": [1500, Infinity]}, \"low_latency\": {\"precedence\": 2, \"value\": true}, \"remote_ip\": {\"precedence\": 2, \"value\": \"10.1.23.45\"}, \"transport_TCP\": {\"value\": true}}";
+#endif
 #endif
 
 static void neat_pm_socket_close(struct neat_ctx *ctx, struct neat_flow *flow, uv_stream_t *handle);
@@ -77,6 +80,10 @@ static void
 on_written(uv_write_t* wr, int status)
 {
     neat_log(NEAT_LOG_DEBUG, "on_written, status %d", status);
+
+#if !defined(USE_TEST_STRING)
+    free(buf[0].base);
+#endif
 
     struct neat_pm_read_data *data = wr->data;
     data->flow->pm_context->pm_handle->data = wr->data;
@@ -185,8 +192,18 @@ neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, pm_reply_callback cb)
 #ifdef ENABLE_WRITE
     uv_write_t *req = malloc(sizeof(*req));
     req->data = data;
+#ifndef USE_TEST_STRING
+    if (flow->properties == NULL) {
+        buf[0].base = strdup("{}");
+    } else {
+        buf[0].base = json_dumps(flow->properties, 0);
+    }
+    assert(buf[0].base);
+    buf[0].len = strlen(buf[0].base);
+#else
     buf[0].base = (char*)test_string;
     buf[0].len = strlen(test_string);
+#endif
     uv_write(req, flow->pm_context->pm_handle, buf, 1, on_written);
 #else
     flow->pm_context->pm_handle->data = data;
