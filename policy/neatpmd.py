@@ -44,12 +44,15 @@ def process_request(json_str):
 class JSONHandler(asyncore.dispatcher_with_send):
     def handle_read(self):
         data = self.recv(8192)
+        if not data:
+            return
+        logging.info("new JSON request received")
 
         # convert to string and delete trailing newline and whitespace
         data = str(data, encoding='utf-8').rstrip()
 
-        logging.info("new JSON request received")
         candidates = process_request(data)
+
         if candidates:
             candidates += '\n'
             self.send(candidates.encode(encoding='utf-8'))
