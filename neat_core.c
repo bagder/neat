@@ -29,6 +29,8 @@
 #include "neat_stat.h"
 #include "neat_json_helpers.h"
 
+#include <ifaddrs.h>
+
 #if defined(USRSCTP_SUPPORT)
     #include "neat_usrsctp_internal.h"
     #include <usrsctp.h>
@@ -37,6 +39,9 @@
     #include "neat_linux_internal.h"
 #endif
 #if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__APPLE__)
+    #include <sys/types.h>
+    #include <sys/socket.h>
+    #include <net/if.h>
     #include "neat_bsd_internal.h"
 #endif
 
@@ -1377,9 +1382,106 @@ on_pm_connected_cb(neat_ctx *ctx, neat_flow *flow)
     neat_pm_send(ctx, flow, on_pm_reply);
 }
 
+/* neat_candidates_fallback generates all possible candidates when the PM is not
+ * available. It exhaustively generates all possible combinations of interface,
+ * source address, and protocol.
+ */
+static neat_error_code
+neat_candidates_fallback(neat_flow *flow, uint16_t port,
+                         struct neat_he_candidates *candidates)
+{
+    uint8_t      nr_of_stacks;
+    int          n, s, family;
+    char         host[NI_MAXHOST];
+    unsigned int if_idx;
+
+    struct ifaddrs          *ifaddrs, *ifa;
+    neat_protocol_stack_type stacks[NEAT_STACK_MAX_NUM];
+
+    neat_log(NEAT_LOG_DEBUG, "%s", __func__);
+
+    nr_of_stacks = neat_property_translate_protocols(flow->propertyMask, stacks);
+    if (nr_of_stacks == 0)
+        return NEAT_ERROR_UNABLE;
+
+    if (getifaddrs(&ifaddrs) < 0) {
+        neat_log(NEAT_LOG_DEBUG, "getifaddrs: %s", strerror(errno));
+        return NEAT_ERROR_INTERNAL;
+    }
+
+    for (ifa = ifaddrs, n = 0; ifa != NULL; ifa = ifa->ifa_next, n++) {
+        if (ifa->ifa_addr == NULL)
+            continue;
+
+        family = ifa->ifa_addr->sa_family;
+
+        if (family == AF_INET || family == AF_INET6) {
+            s = getnameinfo(ifa->ifa_addr,
+                            (family == AF_INET) ? sizeof(struct sockaddr_in) :
+                            sizeof(struct sockaddr_in6),
+                            host, NI_MAXHOST,
+                            NULL, 0, NI_NUMERICHOST);
+            if (s != 0) {
+                neat_log(NEAT_LOG_DEBUG, "getnameinfo() failed: %s\n",
+                         gai_strerror(s));
+                exit(EXIT_FAILURE);
+            }
+
+            if_idx = if_nametoindex(ifa->ifa_name);
+            if (!if_idx)
+                continue;
+
+            for (unsigned int i = 0; i < nr_of_stacks; ++i) {
+                struct neat_he_candidate *candidate = calloc(1, sizeof(*candidate));
+                if (!candidate)
+                    return NEAT_ERROR_INTERNAL;
+
+                candidate->src_address = strdup(host);
+                candidate->if_name     = strdup(ifa->ifa_name);
+                candidate->dst_address = flow->name;
+                candidate->port        = port;
+                candidate->stack       = stacks[i];
+                candidate->if_idx      = if_idx;
+                candidate->family      = family;
+
+                candidate->slen =
+                    (family == AF_INET) ? sizeof(struct sockaddr_in)
+                                        : sizeof(struct sockaddr_in6);
+
+                memcpy(&candidate->saddr, ifa->ifa_addr, candidate->slen);
+
+                LIST_INSERT_HEAD(candidates, candidate, next);
+            }
+        }
+    }
+
+    freeifaddrs(ifaddrs);
+
+    return NEAT_OK;
+}
+
+static void
+neat_free_candidates(struct neat_he_candidates *candidates)
+{
+    struct neat_he_candidate *candidate, *tmp;
+    LIST_FOREACH_SAFE(candidate, candidates, next, tmp) {
+        free(candidate->src_address);
+        free(candidate->if_name);
+        free(candidate);
+    }
+}
+
 neat_error_code
 neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port)
 {
+    /*
+    int   i;
+    char *proto;
+    char *family;
+    */
+
+    // struct neat_he_candidate *candidate;
+
     neat_log(NEAT_LOG_DEBUG, "%s", __func__);
 
     if (flow->name) {
@@ -1395,6 +1497,57 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port)
 
     // return neat_he_lookup(mgr, flow, he_connected_cb);
     return NEAT_OK;
+#if 0
+    struct neat_he_candidates *candidates = calloc(1, sizeof(*candidates));
+    assert(candidates);
+    LIST_INIT(candidates);
+
+    neat_candidates_fallback(flow, port, candidates);
+
+    i = 0;
+    LIST_FOREACH(candidate, candidates, next) {
+        switch (candidate->stack) {
+        case NEAT_STACK_UDP:
+            proto = "UDP";
+            break;
+        case NEAT_STACK_TCP:
+            proto = "TCP";
+            break;
+        case NEAT_STACK_SCTP:
+            proto = "SCTP";
+            break;
+        case NEAT_STACK_UDPLITE:
+            proto = "UDPLite";
+            break;
+        default:
+            proto = "?";
+            break;
+        };
+
+        switch (candidate->family) {
+        case AF_INET:
+            family = "IPv4";
+            break;
+        case AF_INET6:
+            family = "IPv6";
+            break;
+        default:
+            family = "?";
+            break;
+        };
+
+        neat_log(NEAT_LOG_DEBUG, "Candidate %2d: %8s %8s/%s <saddr %s>",
+                 i++,
+                 candidate->if_name,
+                 proto,
+                 family,
+                 candidate->src_address);
+    }
+
+    neat_free_candidates(candidates);
+
+    return neat_he_lookup(mgr, flow, he_connected_cb);
+#endif
 }
 
 neat_error_code
