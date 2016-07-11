@@ -1235,6 +1235,58 @@ static void do_accept(neat_ctx *ctx, neat_flow *flow)
     }
 }
 
+static json_t*
+get_property(json_t *json, const char *key, json_type expected_type)
+{
+    json_t *obj = json_object_get(json, key);
+
+    NEAT_FUNC_TRACE();
+
+    if (!obj) {
+        neat_log(NEAT_LOG_DEBUG, "Unable to find property with key \"%s\"", key);
+        return NULL;
+    }
+
+    obj = json_object_get(obj, "value");
+    if (!obj) {
+        neat_log(NEAT_LOG_DEBUG, "Object with key \"%s\" is missing value key");
+        return NULL;
+    }
+
+    if (json_typeof(obj) != expected_type) {
+        const char *typename = NULL;
+        switch (json_typeof(obj)) {
+        case JSON_OBJECT:
+            typename = "object";
+            break;
+        case JSON_ARRAY:
+            typename = "array";
+            break;
+        case JSON_INTEGER:
+            typename = "integer";
+            break;
+        case JSON_STRING:
+            typename = "string";
+            break;
+        case JSON_REAL:
+            typename = "real";
+            break;
+        case JSON_NULL:
+            typename = "null";
+            break;
+        case JSON_TRUE:
+        case JSON_FALSE:
+            typename = "bool";
+            break;
+        }
+
+        neat_log(NEAT_LOG_DEBUG, "Key \"%s\" had unexpected type", key, typename);
+        return NULL;
+    }
+
+    return obj;
+}
+
 static void
 build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json)
 {
