@@ -176,6 +176,15 @@ he_resolve_cb(struct neat_resolver *resolver, struct neat_resolver_results *resu
     }
 }
 
+/*
+ * TODO: Merge from he_interface
+ */
+neat_error_code
+neat_he_open(neat_ctx *ctx, neat_flow *flow, void *candidate_list, uv_poll_cb callback_fx)
+{
+    return NEAT_ERROR_OK;
+}
+
 neat_error_code neat_he_lookup(neat_ctx *ctx, neat_flow *flow, uv_poll_cb callback_fx)
 {
     neat_protocol_stack_type stacks[NEAT_STACK_MAX_NUM]; /* We only support SCTP, TCP, UDP, and UDPLite */
