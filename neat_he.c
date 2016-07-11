@@ -180,8 +180,64 @@ he_resolve_cb(struct neat_resolver *resolver, struct neat_resolver_results *resu
  * TODO: Merge from he_interface
  */
 neat_error_code
-neat_he_open(neat_ctx *ctx, neat_flow *flow, void *candidate_list, uv_poll_cb callback_fx)
+neat_he_open(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates *candidate_list, uv_poll_cb callback_fx)
 {
+    char *str;
+    const char *proto;
+    size_t i;
+    const char *family;
+    struct neat_he_candidate *candidate;
+
+    i = 0;
+    TAILQ_FOREACH(candidate, candidate_list, next) {
+        switch (candidate->stack) {
+        case NEAT_STACK_UDP:
+            proto = "UDP";
+            break;
+        case NEAT_STACK_TCP:
+            proto = "TCP";
+            break;
+        case NEAT_STACK_SCTP:
+            proto = "SCTP";
+            break;
+        case NEAT_STACK_UDPLITE:
+            proto = "UDPLite";
+            break;
+        default:
+            proto = "?";
+            break;
+        };
+
+        switch (candidate->family) {
+        case AF_INET:
+            family = "IPv4";
+            break;
+        case AF_INET6:
+            family = "IPv6";
+            break;
+        default:
+            family = "?";
+            break;
+        };
+
+        neat_log(NEAT_LOG_DEBUG, "HE Candidate %2d: %8s [%2d] %8s/%s <saddr %s> <dstaddr %s> port %5d priority %d",
+                 i++,
+                 candidate->if_name,
+                 candidate->if_idx,
+                 proto,
+                 family,
+                 candidate->src_address,
+                 candidate->dst_address,
+                 candidate->port,
+                 candidate->priority);
+
+        str = json_dumps(flow->properties, JSON_INDENT(2));
+        neat_log(NEAT_LOG_DEBUG, "Properties:\n%s", str);
+
+        free(str);
+    }
+
+    // neat_free_candidates(candidates);
     return NEAT_ERROR_OK;
 }
 

@@ -244,14 +244,12 @@ struct neat_he_candidate {
     uint16_t    port;
     uint32_t    if_idx;
     char       *if_name;
+    int32_t     priority;
 
-    struct sockaddr_storage saddr;
-    socklen_t               slen;
-
-    LIST_ENTRY(neat_he_candidate) next;
+    TAILQ_ENTRY(neat_he_candidate) next;
 };
 
-LIST_HEAD(neat_he_candidates, neat_he_candidate);
+TAILQ_HEAD(neat_he_candidates, neat_he_candidate);
 
 // Connect context needed during HE.
 struct he_cb_ctx {
@@ -395,6 +393,7 @@ struct neat_resolver {
 };
 
 neat_error_code neat_he_lookup(neat_ctx *ctx, neat_flow *flow, uv_poll_cb callback_fx);
+neat_error_code neat_he_open(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates *candidate_list, uv_poll_cb callback_fx);
 
 // Internal routines for hooking up lower-level services/modules with
 // API callbacks:

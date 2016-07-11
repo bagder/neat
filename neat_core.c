@@ -61,6 +61,7 @@ static void neat_sctp_init_events(struct socket *sock);
 #else
 static void neat_sctp_init_events(int sock);
 #endif
+static void neat_free_candidates(struct neat_he_candidates *candidates);
 
 //Intiailize the OS-independent part of the context, and call the OS-dependent
 //init function
@@ -1245,7 +1246,7 @@ get_property(json_t *json, const char *key, json_type expected_type)
 {
     json_t *obj = json_object_get(json, key);
 
-    NEAT_FUNC_TRACE();
+    // NEAT_FUNC_TRACE();
 
     if (!obj) {
         neat_log(NEAT_LOG_DEBUG, "Unable to find property with key \"%s\"", key);
@@ -1293,9 +1294,10 @@ get_property(json_t *json, const char *key, json_type expected_type)
 }
 
 static void
-build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json)
+build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json, struct neat_he_candidates *candidate_list)
 {
-    size_t i, stack_count, candidate = 0;
+    size_t i, stack_count;
+    int if_idx;
     neat_protocol_stack_type stacks;
     json_t *value;
 
@@ -1309,7 +1311,6 @@ build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json)
         const char *interface = NULL;
         const char *local_ip  = NULL;
         const char *remote_ip = NULL;
-        char *str;
 
         // TODO: In the future, we should require to have an interface speficied
         // at this point
@@ -1333,19 +1334,26 @@ build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json)
             continue;
         }
 
-        str = json_dumps(value, JSON_INDENT(2));
+        struct neat_he_candidate *candidate = calloc(1, sizeof(*candidate));
+        if (!candidate)
+            continue;
 
-        neat_log(NEAT_LOG_DEBUG, "HE Candidate %zu", candidate++);
-        neat_log(NEAT_LOG_DEBUG, "Transport:   %d", stacks);
-        neat_log(NEAT_LOG_DEBUG, "Interface:   %s", interface);
-        neat_log(NEAT_LOG_DEBUG, "Dest IP:     %s", remote_ip);
-        neat_log(NEAT_LOG_DEBUG, "Dest port:   %d", flow->port);
-        neat_log(NEAT_LOG_DEBUG, "IP Family:   %s", "(todo)");
-        neat_log(NEAT_LOG_DEBUG, "Properties:\n%s", str);
+        if_idx = if_nametoindex(interface);
+        if (!if_idx) {
+            neat_log(NEAT_LOG_DEBUG, "Unable to get interface id for \"%\"",
+                     interface);
+            continue;
+        }
 
-        free(str);
+        candidate->src_address = strdup(local_ip);
+        candidate->if_name     = strdup(interface);
+        candidate->dst_address = strdup(remote_ip);
+        candidate->port        = flow->port;
+        candidate->stack       = stacks;
+        candidate->if_idx      = if_idx;
+        candidate->priority    = i; // TODO: Get priority from PM
 
-        // TODO: Append candidate to linked list that will be sent to HE
+        TAILQ_INSERT_TAIL(candidate_list, candidate, next);
     }
 }
 
@@ -1353,6 +1361,7 @@ build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json)
 static void
 on_pm_reply(neat_ctx *ctx, neat_flow *flow, json_t *json)
 {
+    struct neat_he_candidates *candidate_list;
     NEAT_FUNC_TRACE();
 
     assert(ctx);
@@ -1362,7 +1371,12 @@ on_pm_reply(neat_ctx *ctx, neat_flow *flow, json_t *json)
     neat_log(NEAT_LOG_DEBUG, "Reply from PM was: %s", str);
     free(str);
 
-    build_he_candidates(ctx, flow, json);
+    candidate_list = calloc(1, sizeof(*candidate_list));
+    TAILQ_INIT(candidate_list);
+
+    build_he_candidates(ctx, flow, json, candidate_list);
+
+    neat_he_open(ctx, flow, candidate_list, he_connected_cb);
 
     // TODO: Keep properties around after HE?
     json_decref(json);
@@ -1444,13 +1458,7 @@ neat_candidates_fallback(neat_flow *flow, uint16_t port,
                 candidate->if_idx      = if_idx;
                 candidate->family      = family;
 
-                candidate->slen =
-                    (family == AF_INET) ? sizeof(struct sockaddr_in)
-                                        : sizeof(struct sockaddr_in6);
-
-                memcpy(&candidate->saddr, ifa->ifa_addr, candidate->slen);
-
-                LIST_INSERT_HEAD(candidates, candidate, next);
+                TAILQ_INSERT_TAIL(candidates, candidate, next);
             }
         }
     }
@@ -1464,7 +1472,7 @@ static void
 neat_free_candidates(struct neat_he_candidates *candidates)
 {
     struct neat_he_candidate *candidate, *tmp;
-    LIST_FOREACH_SAFE(candidate, candidates, next, tmp) {
+    TAILQ_FOREACH_SAFE(candidate, candidates, next, tmp) {
         free(candidate->src_address);
         free(candidate->if_name);
         free(candidate);
@@ -1474,14 +1482,6 @@ neat_free_candidates(struct neat_he_candidates *candidates)
 neat_error_code
 neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port)
 {
-    /*
-    int   i;
-    char *proto;
-    char *family;
-    */
-
-    // struct neat_he_candidate *candidate;
-
     neat_log(NEAT_LOG_DEBUG, "%s", __func__);
 
     if (flow->name) {
@@ -1495,59 +1495,7 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port)
 
     neat_pm_socket_connect(mgr, flow, on_pm_connected_cb);
 
-    // return neat_he_lookup(mgr, flow, he_connected_cb);
     return NEAT_OK;
-#if 0
-    struct neat_he_candidates *candidates = calloc(1, sizeof(*candidates));
-    assert(candidates);
-    LIST_INIT(candidates);
-
-    neat_candidates_fallback(flow, port, candidates);
-
-    i = 0;
-    LIST_FOREACH(candidate, candidates, next) {
-        switch (candidate->stack) {
-        case NEAT_STACK_UDP:
-            proto = "UDP";
-            break;
-        case NEAT_STACK_TCP:
-            proto = "TCP";
-            break;
-        case NEAT_STACK_SCTP:
-            proto = "SCTP";
-            break;
-        case NEAT_STACK_UDPLITE:
-            proto = "UDPLite";
-            break;
-        default:
-            proto = "?";
-            break;
-        };
-
-        switch (candidate->family) {
-        case AF_INET:
-            family = "IPv4";
-            break;
-        case AF_INET6:
-            family = "IPv6";
-            break;
-        default:
-            family = "?";
-            break;
-        };
-
-        neat_log(NEAT_LOG_DEBUG, "Candidate %2d: %8s %8s/%s <saddr %s>",
-                 i++,
-                 candidate->if_name,
-                 proto,
-                 family,
-                 candidate->src_address);
-    }
-
-    neat_free_candidates(candidates);
-
-    return neat_he_lookup(mgr, flow, he_connected_cb);
-#endif
 }
 
 neat_error_code
