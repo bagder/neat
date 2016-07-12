@@ -1,7 +1,5 @@
 import json
 import logging
-import operator
-import os
 import unittest
 import copy
 import numbers
@@ -9,10 +7,12 @@ import math
 
 logging.basicConfig(format='[%(levelname)s]: %(message)s', level=logging.DEBUG)
 
-POLICY_DIR = "pib/examples/"
-
 
 class NEATPropertyError(Exception):
+    pass
+
+
+class ImmutablePropertyError(NEATPropertyError):
     pass
 
 
@@ -33,20 +33,29 @@ class NEATProperty(object):
     REQUESTED = 1
     INFORMATIONAL = 0
 
-    def __init__(self, prop, precedence=REQUESTED, score=float('NaN')):
-        self.key = prop[0]
-        self._value = prop[1]
+    def __init__(self, keyval, precedence=REQUESTED, score=0):
+        self.key = keyval[0]
+        self._value = keyval[1]
+
+        # new style value range
+        if isinstance(self._value, (dict,)):
+            try:
+                self._value = [self.value['start'], self.value['end']]
+            except KeyError as e:
+                print(e)
+                raise IndexError("Invalid property range")
+
         if isinstance(self.value, (tuple, list)):
             self.value = tuple((float(i) for i in self.value))
             if self.value[0] > self.value[1]:
                 raise IndexError("Invalid property range")
+
         self.precedence = precedence
 
         # a score value of NaN indicates that the property has not been evaluated
         self.score = score
+
         # TODO experimental meta data
-        # specify relationship type between key and value, e.g., using some comparison operator
-        self.relation = '=='  # e.g., 'lt', 'gt', 'ge', '==', 'range', ??
         # mark if property has been updated during a lookup
         self.evaluated = False
         # attach more weight to property score
@@ -60,24 +69,13 @@ class NEATProperty(object):
     def value(self, value):
         old_value = self._value
         self._value = value
+        self.evaluated = True
 
         if isinstance(old_value, (tuple, numbers.Number)) and isinstance(old_value, (tuple, numbers.Number)):
             # FIXME ensure that tuple values are numeric
             new_value = self._range_overlap(old_value)
             if new_value:
                 self._value = new_value
-
-    @property
-    def required(self):
-        return self.precedence == NEATProperty.IMMUTABLE
-
-    @property
-    def requested(self):
-        return self.precedence == NEATProperty.REQUESTED
-
-    @property
-    def informational(self):
-        return self.precedence == NEATProperty.INFORMATIONAL
 
     @property
     def property(self):
@@ -95,19 +93,37 @@ class NEATProperty(object):
         for p in self.property:
             yield p
 
-    def __eq__(self, other):
+    def eq(self, other):
+        if (self.key, self.value, self.precedence) == (other.key, other.value, other.precedence):
+            return True
+        else:
+            return False
+
+    def __add__(self, other):
+        new_prop = copy.deepcopy(self)
+        new_prop.update(other)
+
+        return new_prop
+
+    def __and__(self, other):
         """Return true if a single value is in range, or if two ranges have an overlapping region."""
         assert isinstance(other, NEATProperty)
+
+        if not (self.key == other.key):
+            logging.debug("Property keys do not match")
+            return False
 
         if not isinstance(other.value, tuple) and not isinstance(self.value, tuple):
             if (self.key, self.value) == (other.key, other.value):
                 return self.value
-
-        if not (self.key == other.key):
-            logging.debug("Property key mismatch")
-            return False
+            else:
+                return False
 
         return self._range_overlap(other.value)
+
+    def __eq__(self, other):
+        """Return true if a single value is in range, or if two ranges have an overlapping region."""
+        return bool(self & other)
 
     def __hash__(self):
         # define hash for set comparisons
@@ -175,8 +191,7 @@ class NEATProperty(object):
             if value_differs:
                 self.score = -9999.0  # FIXME adjust scoring
                 logging.debug("property %s is _immutable_: won't update." % (self.key))
-                e = NEATPropertyError('immutable property: %s vs %s' % (self, other), dict(property=[self, other]))
-                raise e
+                raise ImmutablePropertyError('immutable property: %s vs. %s' % (self, other))
             else:
                 self.score += +1.0  # FIXME adjust scoring
                 logging.debug("property %s is already %s" % (self.key, self.value))
@@ -219,7 +234,102 @@ class NEATProperty(object):
             return '?%s?%s' % (keyval_str, score_str)
 
 
-class PropertyDict(dict):
+class PropertyArray(dict):
+    def __init__(self, *properties):
+        self.add(*properties)
+
+    def add(self, *properties):
+        """
+        Insert a new NEATProperty object into the array. If the property key already exists update it.
+        """
+        for property in properties:
+            if isinstance(property, NEATProperty):
+                if property.key in self.keys():
+                    self[property.key].update(property)
+                else:
+                    self[property.key] = property
+            else:
+                logging.error(
+                    "only NEATProperty objects may be added to PropertyDict: received %s instead" % type(property))
+                return
+
+    def __add__(self, other):
+        diff = self ^ other
+        inter = self & other
+        return PropertyArray(*diff.values(), *inter.values())
+
+    def __and__(self, other):
+        """Return new PropertyArray containing the intersection of two PropertyArray objects."""
+        inter = (self[k] + other[k] for k in self.keys() & other.keys())
+        return PropertyArray(*inter)
+
+    def __xor__(self, other):
+        # return symmetric difference, i.e., non overlapping properties
+        diff = [k for k in self.keys() ^ other.keys()]
+        return PropertyArray(*[other[k] for k in diff if k in other], *[self[k] for k in diff if k in self])
+
+    def intersection(self, other):
+        return self & other
+
+    def __repr__(self):
+        slist = []
+        for i in self.values():
+            slist.append(str(i))
+        return '<-' + '--'.join(slist) + '->'
+
+
+class PropertyMultiArray(dict):
+    def __init__(self, *properties):
+        self.add(*properties)
+
+    def __getitem__(self, key):
+        item = super().__getitem__(key)
+        return [i for i in item]
+
+    def __contains__(self, item):
+        # check if item is already in the array
+        return any(item.eq(property) for property in self.get(item.key, []))
+
+    def add(self, *properties):
+        """
+        Insert a new NEATProperty object into the dict. If the property key already exists make it a multi property list.
+        """
+
+        for property in properties:
+            if isinstance(property, list):
+                for p in property:
+                    self.add(p)
+            elif isinstance(property, NEATProperty):
+                if property.key in self.keys() and property not in self:
+                    super().__getitem__(property.key).append(property)
+                else:
+                    self[property.key] = [property]
+            elif not isinstance(property, NEATProperty):
+                logging.error(
+                    "only NEATProperty objects may be added to PropertyDict: received %s instead" % type(property))
+                return
+
+    def expand(self):
+        pas = [PropertyArray()]
+        for k, ps in self.items():
+            tmp = []
+            while len(pas) > 0:
+                pa = pas.pop()
+                for p in ps:
+                    pa_copy = copy.deepcopy(pa)
+                    pa_copy.add(p)
+                    tmp.append(pa_copy)
+            pas.extend(tmp)
+        return pas
+
+    def __repr__(self):
+        slist = []
+        for i in self.values():
+            slist.append(str(i))
+        return '<-' + '--'.join(slist) + '->'
+
+
+class PropertyArray(dict):
     """Convenience class for storing NEATProperties."""
 
     def __init__(self, iterable={}):
@@ -230,7 +340,11 @@ class PropertyDict(dict):
             key = item.key
         else:
             key = item
-        return super().__getitem__(key)
+        item = super().__getitem__(key)
+        return [i for i in item]
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
 
     def update(self, iterable, default_precedence=NEATProperty.REQUESTED):
         """ update properties from:
@@ -254,23 +368,50 @@ class PropertyDict(dict):
                         # TODO initialize score as well
                     self.insert(NEATProperty((k, v), precedence=precedence))
 
-    def intersection(self, other):
-        """Return a new PropertyDict containing the intersection of two PropertyDict objects."""
-        properties = PropertyDict()
-        for k, p in self.items() & other.items():
-            properties.insert(p)
-            # properties.update({p.key: p.value })
-        return properties
+    def update2222(self, *properties):
+        for property in properties:
+            if isinstance(property, list):
+                for p in property:
+                    self.update2(p)
+            elif isinstance(property, NEATProperty):
+                if property.key in self.keys():
+                    super().__getitem__(property.key).update(property)
+                else:
+                    self[property.key] = [property]
+            elif not isinstance(property, NEATProperty):
+                logging.error(
+                    "only NEATProperty objects may be added to PropertyDict: received %s instead" % type(property))
+                return
 
+    def add(self, *properties):
+        """
+        Insert a new NEATProperty object into the dict. If the property key already exists make it a multi property list.
+        """
+
+        for property in properties:
+            if isinstance(property, list):
+                for p in property:
+                    self.add(p)
+            elif isinstance(property, NEATProperty):
+                if property.key in self.keys():
+                    super().__getitem__(property.key).append(property)
+                else:
+                    self[property.key] = [property]
+            elif not isinstance(property, NEATProperty):
+                logging.error(
+                    "only NEATProperty objects may be added to PropertyDict: received %s instead" % type(property))
+                return
+
+    # TODO rename to add?
     def insert(self, *properties):
         """
         Insert a new NEATProperty tuple into the dict or update an existing one.
-
-        :rtype: None
         """
+
         for property in properties:
+
             if not isinstance(property, NEATProperty):
-                logging.warning("only NEATProperty objects may be inserted to PropertyDict.")
+                logging.error("only NEATProperty objects may be inserted to PropertyDict.")
                 return
 
             if property.key in self.keys():
@@ -302,6 +443,28 @@ class PropertyDict(dict):
             return
         self.insert_dict(request_properties)
 
+    def extend(self, other):
+        if not isinstance(other, PropertyArray):
+            return
+
+        new_pd = PropertyArray()
+        for k, v in other.items():
+            for p_other in v:
+                for p_self in self.get(p_other.key, []):
+                    p_new = copy.deepcopy(p_self)
+                    p_new.update(p_other)
+                    new_pd.add(p_new)
+
+        return new_pd
+
+    def intersection(self, other):
+        """Return a new PropertyDict containing the intersection of two PropertyDict objects."""
+        properties = PropertyArray()
+        for k, p in self.items() & other.items():
+            properties.insert(p)
+            # properties.update({p.key: p.value })
+        return properties
+
     @property
     def dict(self):
         """ Return a dictionary containing all NEAT property attributes"""
@@ -330,65 +493,13 @@ class PropertyDict(dict):
         return json.dumps(json_dict, sort_keys=True, indent=indent)
 
     def __repr__(self):
-        return '{' + ', '.join([str(i) for i in self.values()]) + '}'
-
-
-class NEATPolicy(object):
-    """NEAT policy representation"""
-
-    def __init__(self, policy_dict={}, name='NA'):
-        # set default values
-        self.idx = id(self)
-        self.name = policy_dict.get('name', name)
-        for k, v in policy_dict.items():
-            if isinstance(v, str):
-                setattr(self, k, v)
-
-        self.priority = int(policy_dict.get('priority', 0))  # TODO not sure if we need priorities
-
-        self.match = PropertyDict()
-        match = policy_dict.get('match', {})
-        self.match.insert_dict(match)
-
-        self.properties = PropertyDict()
-        properties = policy_dict.get('properties', {})
-        self.properties.insert_dict(properties)
-
-    def match_len(self):
-        """Use the number of match elements to sort the entries in the PIB.
-        Entries with the smallest number of elements are matched first."""
-        return len(self.match)
-
-    def compare(self, properties, strict=True):
-        """Check if the match properties are completely covered by the properties of a query.
-
-        If strict flag is set match only properties with precedences that are higher or equal to the precedence
-        of the corresponding match property.
-        """
-
-        # always return True if the match field is empty (wildcard)
-        if not self.match:
-            return True
-
-        # find intersection
-        matching_props = self.match.items() & properties.items()
-        if strict:
-            # ignore properties with a lower precedence than the associated match property
-            return bool({k for k, v in matching_props if properties[k].precedence >= self.match[k].precedence})
-        else:
-            return bool(matching_props)
-
-    def apply(self, properties: PropertyDict):
-        """Apply policy properties to a set of candidate properties."""
-        for p in self.properties.values():
-            logging.info("applying property %s" % p)
-            properties.insert(p)
-
-    def __str__(self):
-        return "POLICY %s: %s  ==>  %s" % (self.name, self.match, self.properties)
-
-    def __repr__(self):
-        return repr({a: getattr(self, a) for a in ['name', 'match', 'properties']})
+        slist = []
+        for i in self.values():
+            if len(i) == 1:
+                slist.append(str(i[0]))
+            else:
+                slist.append(str(i))
+        return '<' + ', '.join(slist) + '>'
 
 
 class NEATCandidate(object):
@@ -402,7 +513,7 @@ class NEATCandidate(object):
     def __init__(self, properties=None):
         # list to store policies applied to the candidate
         self.policies = set()
-        self.properties = PropertyDict()
+        self.properties = PropertyArray()
         self.invalid = False
 
         if properties:
@@ -426,7 +537,7 @@ class NEATRequest(object):
 
     def __init__(self, *properties):
         # super(NEATRequest, self).__init__(properties)
-        self.properties = PropertyDict()
+        self.properties = PropertyArray()
 
         for p in properties:
             self.properties.insert(p)
@@ -447,111 +558,6 @@ class NEATRequest(object):
         print('===== candidates =====')
 
 
-class PIB(list):
-    def __init__(self, policy_dir=None):
-        super().__init__()
-        self.policies = self
-        self.index = {}
-
-        if policy_dir:
-            self.load_policies(policy_dir)
-
-    def load_policies(self, policy_dir=POLICY_DIR):
-        """Load all policies in policy directory."""
-        for filename in os.listdir(policy_dir):
-            if filename.endswith(('.policy', '.profile')):
-                print('loading policy %s' % filename)
-                p = self.load_policy(policy_dir + filename)
-                self.register(p)
-
-    def load_policy(self, filename):
-        """Read and decode a .policy JSON file and return a NEATPolicy object."""
-        try:
-            policy_file = open(filename, 'r')
-            policy_dict = json.load(policy_file)
-        except OSError as e:
-            logging.error('Policy ' + filename + ' not found.')
-            return
-        except json.decoder.JSONDecodeError as e:
-            logging.error('Error parsing policy file ' + filename)
-            print(e)
-            return
-        p = NEATPolicy(policy_dict)
-        return p
-
-    def register(self, policy):
-        """Register new policy
-
-        Policies are ordered
-        """
-        # check for existing policies with identical match properties
-        if policy.match in [p.match for p in self.policies]:
-            logging.warning("Policy match fields already registered. Skipping policy %s" % (policy.name))
-            return
-        # TODO check for overlaps and split
-        self.policies.append(policy)
-        # TODO sort on the fly
-        self.policies.sort(key=operator.methodcaller('match_len'))
-        self.index[policy.idx] = policy
-
-    def lookup_candidates(self, candidates):
-        # TODO
-        pass
-
-    def lookup_all(self, candidates):
-        """ Lookup all candidates in list. Remove invalid candidates """
-        for candidate in candidates:
-            try:
-                applied_policies = self._lookup(candidate.properties, apply=True)
-                candidate.policies.update(applied_policies)
-            except NEATPropertyError as e:
-                candidate.invalid = True
-                print('Candidate %d is invalidated due to policy.' % (candidates.index(candidate)))
-                logging.debug('invalidated due to: %s' % e.args[0])
-
-        candidates[:] = [c for c in candidates if not c.invalid]
-
-    def _lookup(self, properties, apply=False, remove_matched=False):
-        """ Look through all installed policies to find the ones which match the properties of the given candidate.
-        If apply is True, append the matched policy properties.
-        If remove_matched is True, remove the policy match properties from the candidate.
-
-        Returns all matched policies.
-        """
-
-        assert isinstance(properties, PropertyDict)
-        logging.debug("matching policies for current candidate:")
-
-        applied_policies = []
-        for p in self.policies:
-            if p.compare(properties):
-                if remove_matched and apply:
-                    logging.info("applying profile %s" % p.idx)
-                    for key in p.match:
-                        del properties[key]
-                if apply:
-                    p.apply(properties)
-                    applied_policies.append(p.idx)
-                else:
-                    print(p.idx)
-        return applied_policies
-
-    def dump(self):
-        s = "===== PIB START =====\n"
-        for p in self.policies:
-            s += str(p) + '\n'
-        s += "===== PIB END ====="
-        print(s)
-
-    def __repr__(self):
-        return 'PIB<%d>' % len(self)
-
-    @property
-    def matches(self):
-        """Return the match fields of all installed policies"""
-        return [p.match for p in self.policies]
-
-
 class PropertyTests(unittest.TestCase):
     # TODO
     def test_property_logic(self):
@@ -566,8 +572,39 @@ class PropertyTests(unittest.TestCase):
 if __name__ == "__main__":
     import code
 
-    np = NEATProperty(('foo', 'bar'))
-    pd = PropertyDict()
-    pd.insert(np)
+    np1 = NEATProperty(("MTU", {"start": 50, "end": 1000}))
+    np2 = NEATProperty(("MTU", [1000, 9000]))
+    np3 = NEATProperty(('foo', 'bar'))
+    np4 = NEATProperty(('foo', 'bar2'))
+    np5 = NEATProperty(('moo', 'rar'))
+    np6 = NEATProperty(("MTU", 10000))
 
+    pd = PropertyArray()
+    pd.add(np3)
+    pd.add([np1, np2], np4, np5, np6)
+
+    pd1 = PropertyArray()
+    pd1.add(NEATProperty(('remote_ip', '10.1.23.45')), NEATProperty(('MTU', 2000), precedence=2))
+
+    pd2 = PropertyArray()
+    test_request_str = '{"MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}, "remote_ip": {"precedence": 2, "value": "10.1.23.45"}, "transport_TCP": {"value": true}}'
+    test = json.loads(test_request_str)
+    for k, v in test.items():
+        pd2.add(NEATProperty((k, v['value']), precedence=v.get('precedence', 1)))
+
+    pd3 = PropertyArray()
+    pd3.add(NEATProperty(('remote_ip', '10.1.23.45')), NEATProperty(('MTU', 100), precedence=2))
+
+    pa = PropertyMultiArray([np1, np2], np3)
+    pa.add(np3, np4, np5)
+    # pa.add([np1, np2], np4, np5, np6)
+    pas = pa.expand()
+    print('\n'.join([str(i) for i in pa.expand()]))
+    pa2 = PropertyMultiArray()
+
+    pa3 = PropertyMultiArray()
+    pa3.add([np1, np2], np3, np4, np5, np6)
+
+    pa = PropertyArray()
+    pb = PropertyArray()
     code.interact(local=locals())

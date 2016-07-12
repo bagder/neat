@@ -7,7 +7,8 @@ import socket
 from operator import attrgetter
 
 from cib import CIB
-from policy import PIB, NEATProperty, NEATPolicy, NEATRequest
+from pib import PIB, NEATPolicy
+from policy import NEATProperty, NEATRequest
 
 DOMAIN_SOCK = os.environ['HOME'] + '/.neat/neat_pm_socket'
 
@@ -29,7 +30,9 @@ def process_request(json_str):
 
     # main lookup sequence
     profiles._lookup(request.properties, remove_matched=True, apply=True)
+
     cib.lookup(request)
+
     pib.lookup_all(request.candidates)
 
     request.candidates.sort(key=attrgetter('score'), reverse=True)
@@ -79,5 +82,5 @@ if __name__ == "__main__":
     server = PMServer(DOMAIN_SOCK)
     asyncore.loop()
 
-    # test_request = '{"MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}, "remote_ip": {"precedence": 2, "value": "10.1.23.45"}, "transport_TCP": {"value": true}}'
+    test_request = '{"MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}, "remote_ip": {"precedence": 2, "value": "10.1.23.45"}, "transport_TCP": {"value": true}}'
     # process_request(test_request)
