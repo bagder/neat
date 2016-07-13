@@ -29,7 +29,7 @@ def process_request(json_str):
     print('received NEAT request: %s' % str(request.properties))
 
     # main lookup sequence
-    profiles._lookup(request.properties, remove_matched=True, apply=True)
+    profiles.lookup(request.properties, replace_matched=True, apply=True)
 
     cib.lookup(request)
 
@@ -76,7 +76,7 @@ class PMServer(asyncore.dispatcher):
 if __name__ == "__main__":
     cib = CIB('cib/example/')
     profiles = PIB('pib/profiles/')
-    pib = PIB('pib/examples/')
+    pib = PIB('pib/examples2/')
 
     print('Waiting for PM requests...')
     server = PMServer(DOMAIN_SOCK)

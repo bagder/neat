@@ -26,6 +26,54 @@ def numeric(value):
         return value
 
 
+def dict_to_properties(property_dict={}):
+    """ Import a dictionary containing properties
+
+    example: dict_to_properties({'foo':{'value':'bar', 'precedence':0}})
+
+    """
+    properties = []
+    for key, attr in property_dict.items():
+
+        if isinstance(attr, list):
+            # property value is a list and we need to expand it
+            for p in attr:
+                properties.extend(dict_to_properties({key: p}))
+        else:
+            val = attr['value']
+            try:
+                neat_property = NEATProperty((key, val),
+                                             precedence=attr.get('precedence', NEATProperty.REQUESTED),
+                                             score=attr.get('score', 0.0))
+            except KeyError as e:
+                raise NEATPropertyError('property import failed') from e
+
+            properties.append(neat_property)
+    return properties
+
+
+def json_to_properties(json_str):
+    """ Import a list of JSON encoded properties
+
+    example: json_to_properties('{"foo":{"value":"bar", "precedence":0}}')
+
+    """
+    try:
+        property_dict = json.loads(json_str)
+    except json.decoder.JSONDecodeError as e:
+        logging.error('invalid JSON string: ' + json_str + str(e))
+        return
+
+    return dict_to_properties(property_dict)
+
+
+def properties_to_json(properties, indent=None, with_score=False):
+    pdict = dict()
+    for p in properties.values():
+        pdict.update(p.dict())
+    return json.dumps(pdict, sort_keys=True, indent=indent)
+
+
 class NEATProperty(object):
     """Properties are (key,value) tuples"""
 
@@ -183,10 +231,10 @@ class NEATProperty(object):
             if value_differs:
                 self.score += -1.0  # FIXME adjust scoring
 
-                logging.debug("property %s updated to %s." % (self.key, self.value))
+                # logging.debug("property %s updated to %s." % (self.key, self.value))
             else:
                 self.score += +1.0 + 0 * self.precedence * self.weight  # FIXME adjust scoring
-                logging.debug("property %s is already %s" % (self.key, self.value))
+                # logging.debug("property %s is already %s" % (self.key, self.value))
         elif other.precedence == NEATProperty.IMMUTABLE and self.precedence == NEATProperty.IMMUTABLE:
             if value_differs:
                 self.score = -9999.0  # FIXME adjust scoring
@@ -194,7 +242,7 @@ class NEATProperty(object):
                 raise ImmutablePropertyError('immutable property: %s vs. %s' % (self, other))
             else:
                 self.score += +1.0  # FIXME adjust scoring
-                logging.debug("property %s is already %s" % (self.key, self.value))
+                # logging.debug("property %s is already %s" % (self.key, self.value))
         else:
             if value_differs:
                 # property cannot be fulfilled
@@ -207,7 +255,7 @@ class NEATProperty(object):
                 self.score += +1.0  # FIXME adjust scoring
                 logging.debug("range updated for property %s." % (self.key))
 
-        logging.debug("updated %s" % (self))
+        logging.debug("property updated %s" % (self))
 
     def __str__(self):
         return repr(self)
@@ -271,11 +319,22 @@ class PropertyArray(dict):
     def intersection(self, other):
         return self & other
 
+    @property
+    def score(self):
+        return sum((s.score for s in self.values()))
+
+    def dict(self):
+        """ Return a dictionary containing all NEAT property attributes"""
+        property_dict = dict()
+        for p in self.values():
+            property_dict.update(p.dict())
+        return property_dict
+
     def __repr__(self):
         slist = []
         for i in self.values():
             slist.append(str(i))
-        return '<-' + '--'.join(slist) + '->'
+        return '├─' + '──'.join(slist) + '─┤'
 
 
 class PropertyMultiArray(dict):
@@ -326,10 +385,10 @@ class PropertyMultiArray(dict):
         slist = []
         for i in self.values():
             slist.append(str(i))
-        return '<-' + '--'.join(slist) + '->'
+        return '├─' + '──'.join(slist) + '─┤' # UTF8
 
 
-class PropertyArray(dict):
+class PropertyArray_OLD(dict):
     """Convenience class for storing NEATProperties."""
 
     def __init__(self, iterable={}):
@@ -587,7 +646,7 @@ if __name__ == "__main__":
     pd1.add(NEATProperty(('remote_ip', '10.1.23.45')), NEATProperty(('MTU', 2000), precedence=2))
 
     pd2 = PropertyArray()
-    test_request_str = '{"MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}, "remote_ip": {"precedence": 2, "value": "10.1.23.45"}, "transport_TCP": {"value": true}}'
+    test_request_str = '{"MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}, "remote_ip": {"precedence": 2, "value": "10.1.23.45"}, "transport": {"value": "TCP"}}'
     test = json.loads(test_request_str)
     for k, v in test.items():
         pd2.add(NEATProperty((k, v['value']), precedence=v.get('precedence', 1)))
