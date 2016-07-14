@@ -84,8 +84,8 @@ To run the policy manager with the included sample policies run:
 
 The PM will create two named pipes (if these don’t already exist) called `pm_json.in` and `pm_json.out` and wait for input. Next, a JSON string containing the requested properties can be passed to the input pipe:
 
-    $ JSON=='{"MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}, "remote_ip": {"precedence": 2, "value": "10.1.23.45"}, "transport_TCP": {"value": true}}'   
-    $ echo $JSON >> pm_json.in
+    $ JSON='{"MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}, "remote_ip": {"precedence": 2, "value": "10:54:1.23"}, "transport": {"value": "TCP"}}'
+    $ echo $JSON | nc -U ~/.neat/neat_pm_socket
 
 
 The PM will output a JSON string containing the connection candidates (two of them for the given example) into the out pipe. 

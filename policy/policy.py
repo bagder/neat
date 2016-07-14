@@ -7,6 +7,9 @@ import math
 
 logging.basicConfig(format='[%(levelname)s]: %(message)s', level=logging.DEBUG)
 
+UNDERLINE_START = '\033[4m'
+UNDERLINE_END = '\033[0m'
+
 
 class NEATPropertyError(Exception):
     pass
@@ -44,7 +47,7 @@ def dict_to_properties(property_dict={}):
             try:
                 neat_property = NEATProperty((key, val),
                                              precedence=attr.get('precedence', NEATProperty.REQUESTED),
-                                             score=attr.get('score', 0.0))
+                                             score=attr.get('score', 1.0))
             except KeyError as e:
                 raise NEATPropertyError('property import failed') from e
 
@@ -67,9 +70,9 @@ def json_to_properties(json_str):
     return dict_to_properties(property_dict)
 
 
-def properties_to_json(properties, indent=None, with_score=False):
+def properties_to_json(property_array, indent=None, with_score=False):
     pdict = dict()
-    for p in properties.values():
+    for p in property_array.values():
         pdict.update(p.dict())
     return json.dumps(pdict, sort_keys=True, indent=indent)
 
@@ -99,13 +102,11 @@ class NEATProperty(object):
                 raise IndexError("Invalid property range")
 
         self.precedence = precedence
-
-        # a score value of NaN indicates that the property has not been evaluated
         self.score = score
+        # set if property was updated during a lookup
+        self.evaluated = False
 
         # TODO experimental meta data
-        # mark if property has been updated during a lookup
-        self.evaluated = False
         # attach more weight to property score
         self.weight = 1.0
 
@@ -141,6 +142,10 @@ class NEATProperty(object):
         for p in self.property:
             yield p
 
+    def __hash__(self):
+        # define hash for set comparisons
+        return hash(self.key)
+
     def eq(self, other):
         if (self.key, self.value, self.precedence) == (other.key, other.value, other.precedence):
             return True
@@ -150,7 +155,6 @@ class NEATProperty(object):
     def __add__(self, other):
         new_prop = copy.deepcopy(self)
         new_prop.update(other)
-
         return new_prop
 
     def __and__(self, other):
@@ -171,11 +175,7 @@ class NEATProperty(object):
 
     def __eq__(self, other):
         """Return true if a single value is in range, or if two ranges have an overlapping region."""
-        return bool(self & other)
-
-    def __hash__(self):
-        # define hash for set comparisons
-        return hash(self.key)
+        return self & other
 
     def _range_overlap(self, other_range):
         self_range = self.value
@@ -238,21 +238,21 @@ class NEATProperty(object):
         elif other.precedence == NEATProperty.IMMUTABLE and self.precedence == NEATProperty.IMMUTABLE:
             if value_differs:
                 self.score = -9999.0  # FIXME adjust scoring
-                logging.debug("property %s is _immutable_: won't update." % (self.key))
+                logging.debug("property %s|%s is _immutable_ and differs: can't update." % (self.key, self.value))
                 raise ImmutablePropertyError('immutable property: %s vs. %s' % (self, other))
             else:
                 self.score += +1.0  # FIXME adjust scoring
                 # logging.debug("property %s is already %s" % (self.key, self.value))
         else:
             if value_differs:
-                # property cannot be fulfilled
-                self.score += -1.0  # FIXME adjust scoring
+                # property cannot be fulfilled - but it was not immutable
+                self.score -= other.score  # FIXME adjust scoring
                 logging.debug("property %s cannot be fulfilled." % (self.key))
             else:
                 # update value if numeric value ranges overlap
 
                 self.value = self == other  # comparison returns range intersection
-                self.score += +1.0  # FIXME adjust scoring
+                self.score += other.score  # FIXME adjust scoring
                 logging.debug("range updated for property %s." % (self.key))
 
         logging.debug("property updated %s" % (self))
@@ -273,13 +273,17 @@ class NEATProperty(object):
             score_str = ''
 
         if self.precedence == NEATProperty.IMMUTABLE:
-            return '[%s]%s' % (keyval_str, score_str)
+            property_str = '[%s]%s' % (keyval_str, score_str)
         elif self.precedence == NEATProperty.REQUESTED:
-            return '(%s)%s' % (keyval_str, score_str)
+            property_str = '(%s)%s' % (keyval_str, score_str)
         elif self.precedence == NEATProperty.INFORMATIONAL:
-            return '<%s>%s' % (keyval_str, score_str)
+            property_str = '<%s>%s' % (keyval_str, score_str)
         else:
-            return '?%s?%s' % (keyval_str, score_str)
+            property_str = '?%s?%s' % (keyval_str, score_str)
+
+        if self.evaluated:
+            property_str = UNDERLINE_START + property_str + UNDERLINE_END
+        return property_str
 
 
 class PropertyArray(dict):
@@ -385,7 +389,7 @@ class PropertyMultiArray(dict):
         slist = []
         for i in self.values():
             slist.append(str(i))
-        return '├─' + '──'.join(slist) + '─┤' # UTF8
+        return '├─' + '──'.join(slist) + '─┤'  # UTF8
 
 
 class PropertyArray_OLD(dict):
@@ -646,7 +650,7 @@ if __name__ == "__main__":
     pd1.add(NEATProperty(('remote_ip', '10.1.23.45')), NEATProperty(('MTU', 2000), precedence=2))
 
     pd2 = PropertyArray()
-    test_request_str = '{"MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}, "remote_ip": {"precedence": 2, "value": "10.1.23.45"}, "transport": {"value": "TCP"}}'
+    test_request_str = '{"MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}, "remote_ip": {"precedence": 2, "value": "10:54:1.23"}, "transport": {"value": "TCP"}}'
     test = json.loads(test_request_str)
     for k, v in test.items():
         pd2.add(NEATProperty((k, v['value']), precedence=v.get('precedence', 1)))

@@ -8,7 +8,7 @@ from operator import attrgetter
 
 from cib import CIB
 from pib import PIB, NEATPolicy
-from policy import NEATProperty, NEATRequest
+from policy import NEATProperty, PropertyArray, json_to_properties, properties_to_json
 
 DOMAIN_SOCK = os.environ['HOME'] + '/.neat/neat_pm_socket'
 
@@ -24,41 +24,59 @@ def process_request(json_str):
     """Process JSON requests from NEAT logic"""
     logging.debug(json_str)
 
-    request = NEATRequest()
-    request.properties.insert_json(json_str)
-    print('received NEAT request: %s' % str(request.properties))
+    request = PropertyArray(*json_to_properties(json_str))
+    print('received NEAT request: %s' % request)
 
     # main lookup sequence
-    profiles.lookup(request.properties, replace_matched=True, apply=True)
+    print('Profile lookup...')
+    updated_requests = profiles.lookup(request)
 
-    cib.lookup(request)
+    candidates = []
 
-    pib.lookup_all(request.candidates)
+    print('CIB lookup...')
+    for ur in updated_requests:
+        candidates.extend(cib.lookup(ur))
 
-    request.candidates.sort(key=attrgetter('score'), reverse=True)
-    candidates_json = '[' + ', '.join([candidate.properties.json() for candidate in request.candidates]) + ']'
+    print('PIB lookup...')
+    updated_candidates = []
+    for candidate in candidates:
+        updated_candidates.extend(pib.lookup(candidate))
 
-    logging.info("%d JSON candidates generated" % len(request.candidates))
-    request.dump()
+    updated_candidates.sort(key=attrgetter('score'), reverse=True)
 
+
+    # create JSON string for NEAT logic reply
+    j = [properties_to_json(c) for c in updated_candidates]
+    candidates_json = '[' + ', '.join(j) + ']'
+
+    logging.info("%d JSON candidates generated" % len(updated_candidates))
+    for candidate in updated_candidates:
+        print(candidate)
     return candidates_json
 
 
 class JSONHandler(asyncore.dispatcher_with_send):
     def handle_read(self):
         data = self.recv(8192)
-        if not data:
-            return
-        logging.info("new JSON request received")
 
         # convert to string and delete trailing newline and whitespace
         data = str(data, encoding='utf-8').rstrip()
 
-        candidates = process_request(data)
+        if not data:
+            logging.debug('empty data')
+            return
 
-        if candidates:
-            candidates += '\n'
-            self.send(candidates.encode(encoding='utf-8'))
+        logging.info("new JSON request received")
+        # try:
+        candidates_json = process_request(data)
+        # except Exception as e:
+        #    print("Error processing request: ")
+        #    print(e)
+        #    return
+
+        if candidates_json:
+            candidates_json += '\n'
+            self.send(candidates_json.encode(encoding='utf-8'))
 
 
 class PMServer(asyncore.dispatcher):
@@ -69,18 +87,24 @@ class PMServer(asyncore.dispatcher):
         self.listen(5)
 
     def handle_accepted(self, sock, addr):
-        print('Incoming connection')
+        logging.debug('Incoming connection')
         handler = JSONHandler(sock)
+
+
+def no_loop_test():
+    test_request_str = '{"MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}, "remote_ip": {"precedence": 2, "value": "10:54:1.23"}, "transport": {"value": "TCP"}}'
+    process_request(test_request_str)
 
 
 if __name__ == "__main__":
     cib = CIB('cib/example/')
-    profiles = PIB('pib/profiles/')
-    pib = PIB('pib/examples2/')
+    profiles = PIB('pib/examples/', file_extension='.profile')
+    pib = PIB('pib/examples/', file_extension='.policy')
+
+    no_loop_test()
+    import code
+    code.interact(local=locals(), banner='no loop')
 
     print('Waiting for PM requests...')
     server = PMServer(DOMAIN_SOCK)
     asyncore.loop()
-
-    test_request = '{"MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}, "remote_ip": {"precedence": 2, "value": "10.1.23.45"}, "transport_TCP": {"value": true}}'
-    # process_request(test_request)

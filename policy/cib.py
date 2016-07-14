@@ -9,7 +9,8 @@ from collections import ChainMap
 
 import shutil
 
-from policy import NEATRequest, NEATCandidate, NEATProperty, PropertyArray, PropertyMultiArray, NEATPropertyError
+from policy import NEATRequest, NEATCandidate, NEATProperty, PropertyArray, PropertyMultiArray, NEATPropertyError, \
+    ImmutablePropertyError
 from policy import dict_to_properties
 
 logging.basicConfig(format='[%(levelname)s]: %(message)s', level=logging.DEBUG)
@@ -89,7 +90,7 @@ class CIB(object):
 
     @property
     def roots(self):
-        return {k: v for k, v in cib.idx.items() if v.root}
+        return {k: v for k, v in self.idx.items() if v.root}
 
     def load_cib(self, cib_dir='cib/'):
         """Read all CIB source files from directory CIB_DIR"""
@@ -110,12 +111,22 @@ class CIB(object):
     def __getitem__(self, idx):
         return self.idx[idx]
 
-    def lookup(self, query, candidate_num=5):
+    def lookup(self, input_properties, candidate_num=5):
         """
         CIB lookup logic implementation. Appends a list of connection candidates to the query object. TODO
 
         """
+        assert isinstance(input_properties, PropertyArray)
         candidates = []
+        for e in self.entries:
+            try:
+                candidate = e + input_properties
+                candidate.cib_source = e.cib_source
+                candidates.append(candidate)
+            except ImmutablePropertyError:
+                pass
+
+        return sorted(candidates, key=operator.attrgetter('score'), reverse=True)[:candidate_num]
 
     @property
     def entries(self):
@@ -126,7 +137,9 @@ class CIB(object):
         for k, v in self.roots.items():
             # expand all cib sources
             for p in v.expand():
-                yield PropertyArray(*[p[k] for k in p.keys()])
+                entry = PropertyArray(*[p[k] for k in p.keys()])
+                entry.cib_source = k
+                yield entry
 
     def dump(self, show_all=False):
         ts = shutil.get_terminal_size()
@@ -144,11 +157,11 @@ class CIB(object):
         print("=" * int((tcol - 9) / 2) + " CIB END " + "=" * int((tcol - 9) / 2))
 
     def __repr__(self):
-        return 'CIB<%d>' % (len(cib.idx))
+        return 'CIB<%d>' % (len(self.idx))
 
 
 if __name__ == "__main__":
-    cib = CIB('./cib/example2/')
+    cib = CIB('./cib/example/')
     b = cib['B']
     c = cib['C']
 
@@ -157,6 +170,16 @@ if __name__ == "__main__":
         print(z)
 
     x = b.expand()
+
+    query = PropertyArray()
+    test_request_str = '{"MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}, "remote_ip": {"precedence": 2, "value": "10:54:1.23"}, "transport": {"value": "TCP"}}'
+    test = json.loads(test_request_str)
+    for k, v in test.items():
+        query.add(NEATProperty((k, v['value']), precedence=v.get('precedence', 1)))
+
+    candidates = cib.lookup(query)
+    for i in candidates:
+        print(i, i.cib_source, i.score)
 
     import code
 
