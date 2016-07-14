@@ -19,14 +19,8 @@ class ImmutablePropertyError(NEATPropertyError):
     pass
 
 
-def numeric(value):
-    try:
-        if isinstance(value, tuple):
-            return tuple(float(i) for i in value)
-        else:
-            return float(value)
-    except ValueError:
-        return value
+class InvalidPropertyError(NEATPropertyError):
+    pass
 
 
 def dict_to_properties(property_dict={}):
@@ -71,10 +65,10 @@ def json_to_properties(json_str):
 
 
 def properties_to_json(property_array, indent=None, with_score=False):
-    pdict = dict()
-    for p in property_array.values():
-        pdict.update(p.dict())
-    return json.dumps(pdict, sort_keys=True, indent=indent)
+    property_dict = dict()
+    for i in property_array.values():
+        property_dict.update(i.dict())
+    return json.dumps(property_dict, sort_keys=True, indent=indent)
 
 
 class NEATProperty(object):
@@ -82,7 +76,7 @@ class NEATProperty(object):
 
     IMMUTABLE = 2
     REQUESTED = 1
-    INFORMATIONAL = 0
+    INFORMATIONAL = 0 # TODO we don't really need this
 
     def __init__(self, keyval, precedence=REQUESTED, score=0):
         self.key = keyval[0]
@@ -135,7 +129,7 @@ class NEATProperty(object):
 
     def dict(self, with_score=True):
         """Return a dict for JSON export"""
-        json_dict = {self.key: dict(value=self.value, precedence=self.precedence, score=self.score)}
+        json_dict = {self.key: dict(value=self.value, precedence=self.precedence, score=self.score, evaluated=self.evaluated)}
         return json_dict
 
     def __iter__(self):
@@ -325,7 +319,7 @@ class PropertyArray(dict):
 
     @property
     def score(self):
-        return sum((s.score for s in self.values()))
+        return sum((s.score for s in self.values() if s.evaluated))
 
     def dict(self):
         """ Return a dictionary containing all NEAT property attributes"""
@@ -390,235 +384,6 @@ class PropertyMultiArray(dict):
         for i in self.values():
             slist.append(str(i))
         return '├─' + '──'.join(slist) + '─┤'  # UTF8
-
-
-class PropertyArray_OLD(dict):
-    """Convenience class for storing NEATProperties."""
-
-    def __init__(self, iterable={}):
-        self.update(iterable, default_precedence=NEATProperty.REQUESTED)
-
-    def __getitem__(self, item):
-        if isinstance(item, NEATProperty):
-            key = item.key
-        else:
-            key = item
-        item = super().__getitem__(key)
-        return [i for i in item]
-
-    def __setitem__(self, key, value):
-        super().__setitem__(key, value)
-
-    def update(self, iterable, default_precedence=NEATProperty.REQUESTED):
-        """ update properties from:
-                a dict containing key:value pairs
-                an iterable containing neat property objects
-                an iterable containing (key, value, precedence) tuples
-
-        TODO
-        """
-        if isinstance(iterable, dict):
-            for k, v in iterable.items():
-                self.insert(NEATProperty((k, v), precedence=default_precedence))
-        else:
-            for i in iterable:
-                if isinstance(i, NEATProperty):
-                    self.insert(i)
-                else:
-                    k, v, *l = i
-                    if l:
-                        precedence = l[0]
-                        # TODO initialize score as well
-                    self.insert(NEATProperty((k, v), precedence=precedence))
-
-    def update2222(self, *properties):
-        for property in properties:
-            if isinstance(property, list):
-                for p in property:
-                    self.update2(p)
-            elif isinstance(property, NEATProperty):
-                if property.key in self.keys():
-                    super().__getitem__(property.key).update(property)
-                else:
-                    self[property.key] = [property]
-            elif not isinstance(property, NEATProperty):
-                logging.error(
-                    "only NEATProperty objects may be added to PropertyDict: received %s instead" % type(property))
-                return
-
-    def add(self, *properties):
-        """
-        Insert a new NEATProperty object into the dict. If the property key already exists make it a multi property list.
-        """
-
-        for property in properties:
-            if isinstance(property, list):
-                for p in property:
-                    self.add(p)
-            elif isinstance(property, NEATProperty):
-                if property.key in self.keys():
-                    super().__getitem__(property.key).append(property)
-                else:
-                    self[property.key] = [property]
-            elif not isinstance(property, NEATProperty):
-                logging.error(
-                    "only NEATProperty objects may be added to PropertyDict: received %s instead" % type(property))
-                return
-
-    # TODO rename to add?
-    def insert(self, *properties):
-        """
-        Insert a new NEATProperty tuple into the dict or update an existing one.
-        """
-
-        for property in properties:
-
-            if not isinstance(property, NEATProperty):
-                logging.error("only NEATProperty objects may be inserted to PropertyDict.")
-                return
-
-            if property.key in self.keys():
-                self[property.key].update(property)
-            else:
-                self.__setitem__(property.key, property)
-
-    def insert_dict(self, json_dict={}):
-        """ Import a dictionary containing properties
-
-        example insert_dict({'foo':{'value':'bar', 'precedence':0}})
-        """
-        for key, attr in json_dict.items():
-            try:
-                neat_property = NEATProperty((key, attr['value']),
-                                             precedence=attr.get('precedence', NEATProperty.REQUESTED),
-                                             score=attr.get('score', math.nan))
-            except KeyError as e:
-                raise NEATPropertyError('property import failed') from e
-
-            self.insert(neat_property)
-
-    def insert_json(self, json_str='{}'):
-        """ Import a list of JSON encoded properties"""
-        try:
-            request_properties = json.loads(json_str)
-        except json.decoder.JSONDecodeError:
-            logging.error('invalid JSON string: ' + json_str)
-            return
-        self.insert_dict(request_properties)
-
-    def extend(self, other):
-        if not isinstance(other, PropertyArray):
-            return
-
-        new_pd = PropertyArray()
-        for k, v in other.items():
-            for p_other in v:
-                for p_self in self.get(p_other.key, []):
-                    p_new = copy.deepcopy(p_self)
-                    p_new.update(p_other)
-                    new_pd.add(p_new)
-
-        return new_pd
-
-    def intersection(self, other):
-        """Return a new PropertyDict containing the intersection of two PropertyDict objects."""
-        properties = PropertyArray()
-        for k, p in self.items() & other.items():
-            properties.insert(p)
-            # properties.update({p.key: p.value })
-        return properties
-
-    @property
-    def dict(self):
-        """ Return a dictionary containing all NEAT property attributes"""
-        property_dict = dict()
-        for p in self.values():
-            property_dict.update(p.dict())
-        return property_dict
-
-    @property
-    def list(self):
-        """ Return a sorted list containing all property objects"""
-        property_list = [i.dict() for i in self.values()]
-        # TODO sort by score
-        return property_list
-
-    def json(self, indent=None, with_score=False):
-        json_dict = copy.deepcopy(self.dict)
-        # delete any NaN scores from JSON
-        if not with_score:
-            for k, v in json_dict.items():
-                if math.isnan(v.get('score', math.nan)):
-                    try:
-                        del v['score']
-                    except KeyError:
-                        pass
-        return json.dumps(json_dict, sort_keys=True, indent=indent)
-
-    def __repr__(self):
-        slist = []
-        for i in self.values():
-            if len(i) == 1:
-                slist.append(str(i[0]))
-            else:
-                slist.append(str(i))
-        return '<' + ', '.join(slist) + '>'
-
-
-class NEATCandidate(object):
-    """Neat candidate objects store a list of properties for potential NEAT connections.
-    They are created after a CIB lookup.
-
-      NEATCandidate.cib: contains the matched cib entry
-      NEATCandidate.policies: contains a list of applied policies
-    """
-
-    def __init__(self, properties=None):
-        # list to store policies applied to the candidate
-        self.policies = set()
-        self.properties = PropertyArray()
-        self.invalid = False
-
-        if properties:
-            self.properties = copy.deepcopy(properties)
-            # for property in properties.values():
-            #    self.properties.insert(property)
-
-    @property
-    def score(self):
-        return sum(i.score for i in self.properties.values() if not math.isnan(i.score))
-
-    def dump(self):
-        print('PROPERTIES: ' + str(self.properties) + ', POLICIES: ' + str(self.policies))
-
-    def __repr__(self):
-        return str(self.properties)
-
-
-class NEATRequest(object):
-    """NEAT query"""
-
-    def __init__(self, *properties):
-        # super(NEATRequest, self).__init__(properties)
-        self.properties = PropertyArray()
-
-        for p in properties:
-            self.properties.insert(p)
-
-        # Each NEATRequest contains a list of NEATCandidate objects
-        self.candidates = []
-        self.cib = None
-
-    def __repr__(self):
-        return '<NEATRequest: %d candidates, %d properties>' % (len(self.candidates), len(self.properties))
-
-    def dump(self):
-        print(self.properties)
-        print('===== candidates =====')
-        for i, c in enumerate(self.candidates):
-            print('%d: ' % i, end='')
-            c.dump()
-        print('===== candidates =====')
 
 
 class PropertyTests(unittest.TestCase):

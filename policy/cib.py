@@ -1,19 +1,31 @@
-import logging
-import os
-import operator
-import json
 import bisect
 import itertools
-
+import json
+import logging
+import operator
+import os
+import shutil
 from collections import ChainMap
 
-import shutil
-
-from policy import NEATRequest, NEATCandidate, NEATProperty, PropertyArray, PropertyMultiArray, NEATPropertyError, \
-    ImmutablePropertyError
+from policy import NEATProperty, PropertyArray, PropertyMultiArray, ImmutablePropertyError
 from policy import dict_to_properties
 
 logging.basicConfig(format='[%(levelname)s]: %(message)s', level=logging.DEBUG)
+
+
+def load_json(filename):
+    """
+    Read CIB source from JSON file
+    """
+
+    cib_file = open(filename, 'r')
+    try:
+        j = json.load(cib_file)
+    except json.decoder.JSONDecodeError as e:
+        logging.error("Could not parse CIB file " + filename)
+        print(e)
+        return
+    return j
 
 
 class CIBSource(object):
@@ -52,27 +64,13 @@ class CIBSource(object):
         properties = []
         for p in paths:
             expanded_properties = (self.cib[idx].properties.expand() for idx in p)
-            for i in itertools.product(*expanded_properties):
-                # print(i)
-                properties.append(ChainMap(*i))
+            for pas in itertools.product(*expanded_properties):
+                properties.append(ChainMap(*pas))
         return properties
 
     def __repr__(self):
         s = ''
         return "%s @refs%s" % (self.properties, self.refs)
-
-
-def load_json(filename):
-    """Read CIB source from JSON file"""
-
-    cib_file = open(filename, 'r')
-    try:
-        j = json.load(cib_file)
-    except json.decoder.JSONDecodeError as e:
-        logging.error("Could not parse CIB file " + filename)
-        print(e)
-        return
-    return j
 
 
 class CIB(object):
