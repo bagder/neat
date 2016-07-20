@@ -122,6 +122,8 @@ on_written(uv_write_t* wr, int status)
     struct neat_pm_read_data *data = wr->data;
     data->flow->pm_context->pm_handle->data = wr->data;
     uv_read_start(data->flow->pm_context->pm_handle, on_request_alloc, on_read);
+
+    free(wr);
 }
 
 static void
@@ -153,6 +155,7 @@ on_pm_connected(uv_connect_t* req, int status)
     data->on_pm_connected(data->ctx, data->flow);
 
 error:
+    free(req);
     free(data);
 }
 
