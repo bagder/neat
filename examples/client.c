@@ -152,7 +152,7 @@ on_readable(struct neat_flow_operations *opCB)
         fprintf(stderr, "%s()\n", __func__);
     }
 
-    code = neat_read(opCB->ctx, opCB->flow, buffer_rcv, config_rcv_buffer_size, &buffer_filled);
+    code = neat_read(opCB->ctx, opCB->flow, buffer_rcv, config_rcv_buffer_size, &buffer_filled, NULL, 0);
     if (code != NEAT_OK) {
         if (code == NEAT_ERROR_WOULD_BLOCK) {
             if (config_log_level >= 1) {
@@ -196,7 +196,7 @@ on_writable(struct neat_flow_operations *opCB)
         fprintf(stderr, "%s()\n", __func__);
     }
 
-    code = neat_write(opCB->ctx, opCB->flow, stdin_buffer.buffer, stdin_buffer.buffer_filled);
+    code = neat_write(opCB->ctx, opCB->flow, stdin_buffer.buffer, stdin_buffer.buffer_filled, NULL, 0);
     if (code != NEAT_OK) {
         fprintf(stderr, "%s - neat_write - error: %d\n", __func__, (int)code);
         return on_error(opCB);
@@ -463,7 +463,7 @@ main(int argc, char *argv[])
     }
 
     // wait for on_connected or on_error to be invoked
-    if (neat_open(ctx, flow, argv[argc - 2], strtoul (argv[argc - 1], NULL, 0)) == NEAT_OK) {
+    if (neat_open(ctx, flow, argv[argc - 2], strtoul (argv[argc - 1], NULL, 0), NULL, 0) == NEAT_OK) {
         neat_start_event_loop(ctx, NEAT_RUN_DEFAULT);
     } else {
         fprintf(stderr, "%s - error: neat_open\n", __func__);
