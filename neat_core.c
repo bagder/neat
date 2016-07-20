@@ -1359,7 +1359,7 @@ build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json, struct neat_he
 
 
 static void
-on_pm_reply(neat_ctx *ctx, neat_flow *flow, json_t *json)
+on_pm_reply_post_resolve(neat_ctx *ctx, neat_flow *flow, json_t *json)
 {
     struct neat_he_candidates *candidate_list;
     NEAT_FUNC_TRACE();
@@ -1372,6 +1372,7 @@ on_pm_reply(neat_ctx *ctx, neat_flow *flow, json_t *json)
     free(str);
 
     candidate_list = calloc(1, sizeof(*candidate_list));
+    assert(candidate_list);
     TAILQ_INIT(candidate_list);
 
     build_he_candidates(ctx, flow, json, candidate_list);
@@ -1383,6 +1384,84 @@ on_pm_reply(neat_ctx *ctx, neat_flow *flow, json_t *json)
 }
 
 static void
+on_candidates_resolved(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates *candidate_list, json_t *json)
+{
+    size_t index = 0;
+    char *buffer;
+    struct neat_he_candidate *candidate;
+    NEAT_FUNC_TRACE();
+    // Now that the names in the list are resolved, append the new data to the
+    // json objects and perform a new call to the PM
+
+    TAILQ_FOREACH(candidate, candidate_list, next) {
+        json_t *object, *dst_address, *str;
+        object = json_array_get(json, index);
+
+        //dst_address = json_pack();
+        str = json_object();
+        dst_address = json_object();
+
+        json_string_set(str, candidate->dst_address);
+        json_object_set(dst_address, "value", str);
+        json_object_set(object, "dst_address", dst_address);
+    }
+
+    buffer = json_dumps(json, JSON_INDENT(2));
+    neat_pm_send(ctx, flow, buffer, on_pm_reply_post_resolve);
+}
+
+static void
+on_pm_reply_pre_resolve(neat_ctx *ctx, neat_flow *flow, json_t *json)
+{
+    size_t i;
+    json_t *value;
+    struct neat_he_candidates *candidate_list;
+    NEAT_FUNC_TRACE();
+
+    assert(ctx);
+    assert(flow);
+
+    // By now, we know which interface(s) to perform name resolution on.
+    // The next step is to have HE resolve the names if necessary.
+    // Once HE has performed the name resolution, we send a second call to the
+    // PM to apply further policies based on results of the name resolution.
+
+    candidate_list = calloc(1, sizeof(*candidate_list));
+    assert(candidate_list);
+    TAILQ_INIT(candidate_list);
+
+    json_array_foreach(json, i, value) {
+        const char *address = NULL;
+        const char *interface = NULL;
+        const char *local_ip  = NULL;
+        struct neat_he_candidate *candidate;
+
+        candidate = calloc(1, sizeof(*candidate));
+
+        address = json_string_value(get_property(value, "address", JSON_STRING));
+        if (!address)
+            continue;
+
+        interface = json_string_value(get_property(value, "interface", JSON_STRING));
+        if (!interface)
+            continue;
+
+        local_ip = json_string_value(get_property(value, "local_ip", JSON_STRING));
+        if (!local_ip)
+            continue;
+
+        candidate->dst_address = address;
+        candidate->if_name = (char*)interface;
+        candidate->src_address = (char*)local_ip;
+
+        TAILQ_INSERT_TAIL(candidate_list, candidate, next);
+    }
+
+    // TODO: Should json ptr be in a request struct?
+    // neat_he_resolve_candidates(ctx, flow, candidate_list, on_candidates_resolved, json);
+}
+
+static void
 on_pm_timeout()
 {
     // TODO: Wire up and implement
@@ -1391,9 +1470,12 @@ on_pm_timeout()
 static void
 on_pm_connected_cb(neat_ctx *ctx, neat_flow *flow)
 {
+    char *buffer;
     NEAT_FUNC_TRACE();
 
-    neat_pm_send(ctx, flow, on_pm_reply);
+    buffer = json_dumps(flow->properties, JSON_INDENT(2));
+
+    neat_pm_send(ctx, flow, buffer, on_pm_reply_pre_resolve);
 }
 
 /* neat_candidates_fallback generates all possible candidates when the PM is not
@@ -1492,6 +1574,13 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port)
     flow->port = port;
     flow->propertyAttempt = flow->propertyMask;
     flow->stream_count = 1;
+
+    json_t *address = json_pack("{ss}", "value", name);
+    json_object_set(flow->properties, "name", address);
+
+    json_dumps(address, JSON_INDENT(2));
+    char *buffer = json_dumps(flow->properties, JSON_INDENT(2));
+    neat_log(NEAT_LOG_DEBUG, "%s", buffer);
 
     neat_pm_socket_connect(mgr, flow, on_pm_connected_cb);
 

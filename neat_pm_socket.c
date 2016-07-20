@@ -179,36 +179,30 @@ neat_pm_socket_close(struct neat_ctx *ctx, struct neat_flow *flow, uv_stream_t *
 }
 
 neat_error_code
-neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, pm_reply_callback cb)
+neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, const char *buffer, pm_reply_callback cb)
 {
     NEAT_FUNC_TRACE();
+
+    assert(buffer);
 
     struct neat_pm_read_data *data = malloc(sizeof(*data));
     data->ctx = ctx;
     data->flow = flow;
     data->on_pm_reply = cb;
+    data->read_buffer = NULL;
 
-
-#ifdef ENABLE_WRITE
     uv_write_t *req = malloc(sizeof(*req));
     req->data = data;
-#ifndef USE_TEST_STRING
-    if (flow->properties == NULL) {
-        buf[0].base = strdup("{}");
-    } else {
-        buf[0].base = json_dumps(flow->properties, 0);
-    }
-    assert(buf[0].base);
-    buf[0].len = strlen(buf[0].base);
-#else
+
+#ifdef USE_TEST_STRING
     buf[0].base = (char*)test_string;
     buf[0].len = strlen(test_string);
-#endif
-    uv_write(req, flow->pm_context->pm_handle, buf, 1, on_written);
 #else
-    flow->pm_context->pm_handle->data = data;
-    uv_read_start(flow->pm_context->pm_handle, on_request_alloc, on_read);
+    buf[0].base = (char*)buffer;
+    buf[0].len = strlen(buffer);
 #endif
+
+    uv_write(req, flow->pm_context->pm_handle, buf, 1, on_written);
 
     return NEAT_OK;
 }
