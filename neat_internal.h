@@ -290,6 +290,7 @@ struct neat_he_candidate {
     uint32_t    if_idx;
     char       *if_name;
     int32_t     priority;
+    json_t     *properties;
 
     TAILQ_ENTRY(neat_he_candidate) next;
 };
