@@ -19,6 +19,6 @@ struct neat_pm_request {
 };
 
 neat_error_code neat_pm_socket_connect(struct neat_ctx *ctx, struct neat_flow *flow, pm_callback cb);
-neat_error_code neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, pm_reply_callback cb);
+neat_error_code neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, const char *buffer, pm_reply_callback cb);
 
 #endif /* ifndef NEAT_PM_SOCKET_INCLUDE */

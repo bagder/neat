@@ -94,7 +94,7 @@ find_enabled_protocols(json_t *json, neat_protocol_stack_type *stacks,
     NEAT_FUNC_TRACE();
 
     assert(stacks && stack_count);
-    assert(*stack_count >= NEAT_MAX_NUM_PROTO);
+    // assert(*stack_count >= NEAT_MAX_NUM_PROTO);
 
     *stack_count = 0;
 

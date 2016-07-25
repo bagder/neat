@@ -12,7 +12,6 @@
 // #define USE_TEST_STRING
 
 // Uncomment this to read a single reply only from the PM
-#define READ_ONCE
 
 #ifdef ENABLE_WRITE
 uv_buf_t buf[1];
@@ -34,45 +33,80 @@ struct neat_pm_read_data {
     struct neat_ctx *ctx;
     struct neat_flow *flow;
     pm_reply_callback on_pm_reply;
+    char *read_buffer;
+    size_t buffer_size;
+    ssize_t nesting_count;
 };
 
 static void
 on_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
 {
-    // TODO: Fragile
-    // Assumes that the reply from PM can be read all at once.
-
     json_t *json;
     json_error_t error;
-    neat_log(NEAT_LOG_DEBUG, "on_read pm, got %d bytes", nread);
+    struct neat_pm_read_data *data = stream->data;
 
-    json = json_loadb(buf->base, nread, 0, &error);
+    assert(nread > 0);
+    assert(nread != UV_EOF);
+
+    unsigned int current_nesting = data->nesting_count;
+    for (ssize_t i = 0; i < nread; ++i) {
+        if (buf->base[i] == '{' || buf->base[i] == '[') {
+            current_nesting++;
+        } else if (buf->base[i] == '}' || buf->base[i] == ']') {
+            current_nesting--;
+        }
+    }
+    // neat_log(NEAT_LOG_DEBUG, "Current nesting: %d", current_nesting);
+
+    // Check if we have read everything in one go
+    if (current_nesting == 0 && data->buffer_size == 0) {
+        data->read_buffer = buf->base;
+        data->buffer_size = nread;
+        data->nesting_count = -1; // Don't free data->read_buffer at the end
+        goto complete_message;
+    }
+
+    data->nesting_count = current_nesting;
+    data->read_buffer = realloc(data->read_buffer, data->buffer_size + nread);
+    assert(data->read_buffer);
+    memcpy(data->read_buffer + data->buffer_size, buf->base, nread);
+    data->buffer_size += nread;
+
+    // Check if this is the last part of a JSON message. If it's not, return and
+    // wait for the next part.
+    if (current_nesting) {
+        neat_log(NEAT_LOG_DEBUG, "Received paratial JSON message, %zu + %zu = %zi",
+                 data->buffer_size - nread, nread, data->buffer_size);
+        free(buf->base);
+        return;
+    }
+complete_message:
+    neat_log(NEAT_LOG_DEBUG, "on_read pm, got %d bytes", data->buffer_size);
+
+    json = json_loadb(data->read_buffer, data->buffer_size, 0, &error);
     if (!json) {
         neat_log(NEAT_LOG_DEBUG, "Failed to read JSON reply from PM");
         neat_log(NEAT_LOG_DEBUG, "Error at position %d:", error.position);
         neat_log(NEAT_LOG_DEBUG, error.text);
-        goto error;
+        goto end;
     }
 
-    struct neat_pm_read_data *data = stream->data;
+    free(buf->base);
+
     data->on_pm_reply(data->ctx, data->flow, json);
 
-#ifdef READ_ONCE
+end:
     uv_read_stop(stream);
     neat_pm_socket_close(data->ctx, data->flow, stream);
     free(data);
-#endif
-
-error:
-    free(buf->base);
 }
 
 static void
 on_request_alloc(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
 {
     neat_log(NEAT_LOG_DEBUG, "on_request_alloc");
-    buf->base = malloc(1024);
-    buf->len = 1024;
+    buf->base = malloc(4096);
+    buf->len = 4096;
     assert(buf->base);
 }
 
@@ -88,6 +122,8 @@ on_written(uv_write_t* wr, int status)
     struct neat_pm_read_data *data = wr->data;
     data->flow->pm_context->pm_handle->data = wr->data;
     uv_read_start(data->flow->pm_context->pm_handle, on_request_alloc, on_read);
+
+    free(wr);
 }
 
 static void
@@ -119,6 +155,7 @@ on_pm_connected(uv_connect_t* req, int status)
     data->on_pm_connected(data->ctx, data->flow);
 
 error:
+    free(req);
     free(data);
 }
 
@@ -179,36 +216,29 @@ neat_pm_socket_close(struct neat_ctx *ctx, struct neat_flow *flow, uv_stream_t *
 }
 
 neat_error_code
-neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, pm_reply_callback cb)
+neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, const char *buffer, pm_reply_callback cb)
 {
     NEAT_FUNC_TRACE();
 
-    struct neat_pm_read_data *data = malloc(sizeof(*data));
+    assert(buffer);
+
+    struct neat_pm_read_data *data = calloc(1, sizeof(*data));
     data->ctx = ctx;
     data->flow = flow;
     data->on_pm_reply = cb;
 
-
-#ifdef ENABLE_WRITE
     uv_write_t *req = malloc(sizeof(*req));
     req->data = data;
-#ifndef USE_TEST_STRING
-    if (flow->properties == NULL) {
-        buf[0].base = strdup("{}");
-    } else {
-        buf[0].base = json_dumps(flow->properties, 0);
-    }
-    assert(buf[0].base);
-    buf[0].len = strlen(buf[0].base);
-#else
+
+#ifdef USE_TEST_STRING
     buf[0].base = (char*)test_string;
     buf[0].len = strlen(test_string);
-#endif
-    uv_write(req, flow->pm_context->pm_handle, buf, 1, on_written);
 #else
-    flow->pm_context->pm_handle->data = data;
-    uv_read_start(flow->pm_context->pm_handle, on_request_alloc, on_read);
+    buf[0].base = (char*)buffer;
+    buf[0].len = strlen(buffer);
 #endif
+
+    uv_write(req, flow->pm_context->pm_handle, buf, 1, on_written);
 
     return NEAT_OK;
 }
