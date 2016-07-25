@@ -25,8 +25,14 @@ def process_request(json_str, num_candidates=10):
     """Process JSON requests from NEAT logic"""
     logging.debug(json_str)
 
-    request = PropertyArray(*policy.json_to_properties(json_str))
+    properties = policy.json_to_properties(json_str)
+    if not properties:
+        return
+
+    request = PropertyArray(*properties)
     print('Received NEAT request: %s' % request)
+
+
 
     # main lookup sequence
     print('Profile lookup...')
@@ -64,12 +70,15 @@ class PMProtocol(asyncio.Protocol):
         logging.info("New JSON request received (%dB)" % len(self.request))
 
         candidates = process_request(self.request)
-
         # create JSON string for NEAT logic reply
-        j = [policy.properties_to_json(c) for c in candidates]
-        candidates_json = '[' + ', '.join(j) + ']\n'
+        try:
+            j = [policy.properties_to_json(c) for c in candidates]
+            candidates_json = '[' + ', '.join(j) + ']\n'
+        except TypeError:
+            return
 
         data = candidates_json.encode(encoding='utf-8')
+
         self.transport.write(data)
         self.transport.close()
 

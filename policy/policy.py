@@ -58,7 +58,7 @@ def json_to_properties(json_str):
     try:
         property_dict = json.loads(json_str)
     except json.decoder.JSONDecodeError as e:
-        logging.error('invalid JSON string: ' + json_str + str(e))
+        logging.error(json_str + ' is not a valid JSON string: ' + str(e))
         return
 
     return dict_to_properties(property_dict)
