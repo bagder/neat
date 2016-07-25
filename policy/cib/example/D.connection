@@ -1,0 +1,9 @@
+{
+    "id": "D",
+    "priority": 2,
+    "properties":{
+        "foo": {"value": 0.63, "precedence":1},
+        "bar": {"value": 123, "precedence":0}
+    },
+    "@next" : ["C", "B"]
+}

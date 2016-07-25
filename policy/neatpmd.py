@@ -10,7 +10,7 @@ from pib import PIB
 from policy import PropertyArray
 
 DOMAIN_SOCK = os.environ['HOME'] + '/.neat/neat_pm_socket'
-PIB_DIR = 'pib/examples/'
+PIB_DIR = 'pib/example/'
 CIB_DIR = 'cib/example/'
 
 # Make sure the socket does not already exist
