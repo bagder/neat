@@ -1,9 +1,9 @@
+import copy
 import json
 import logging
-import unittest
-import copy
-import numbers
 import math
+import numbers
+import unittest
 
 logging.basicConfig(format='[%(levelname)s]: %(message)s', level=logging.DEBUG)
 
@@ -23,7 +23,7 @@ class InvalidPropertyError(NEATPropertyError):
     pass
 
 
-def dict_to_properties(property_dict={}):
+def dict_to_properties(property_dict):
     """ Import a dictionary containing properties
 
     example: dict_to_properties({'foo':{'value':'bar', 'precedence':0}})
@@ -76,7 +76,7 @@ class NEATProperty(object):
 
     IMMUTABLE = 2
     REQUESTED = 1
-    INFORMATIONAL = 0 # TODO we don't really need this
+    INFORMATIONAL = 0  # TODO we don't really need this
 
     def __init__(self, keyval, precedence=REQUESTED, score=0):
         self.key = keyval[0]
@@ -96,8 +96,8 @@ class NEATProperty(object):
                 raise IndexError("Invalid property range")
 
         self.precedence = precedence
-        self.score = score
-        # set if property was updated during a lookup
+        self.score = score  # TODO maybe we should call this weight or impact factor
+        # set if property was compared or updated during a lookup
         self.evaluated = False
 
         # TODO experimental meta data
@@ -124,12 +124,14 @@ class NEATProperty(object):
     def property(self):
         return self.key, self.value
 
+    # DELETEME
     def items(self):
         return self.property
 
     def dict(self, with_score=True):
         """Return a dict for JSON export"""
-        json_dict = {self.key: dict(value=self.value, precedence=self.precedence, score=self.score, evaluated=self.evaluated)}
+        json_dict = {
+            self.key: dict(value=self.value, precedence=self.precedence, score=self.score, evaluated=self.evaluated)}
         return json_dict
 
     def __iter__(self):

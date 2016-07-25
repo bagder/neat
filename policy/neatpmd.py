@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-import asyncore
+import asyncio
 import logging
 import os
-import socket
-
 from operator import attrgetter
 
+import policy
 from cib import CIB
 from pib import PIB
-import policy
 from policy import PropertyArray
 
 DOMAIN_SOCK = os.environ['HOME'] + '/.neat/neat_pm_socket'
@@ -48,48 +46,40 @@ def process_request(json_str, num_candidates=10):
     logging.info("%d candidates generated" % len(candidates))
     for candidate in updated_candidates:
         print(candidate, candidate.score)
-    # TODO check if candidates have src/dst/transport tuple
+    # TODO check if candidates contain the minimum src/dst/transport tuple
     return updated_candidates[:num_candidates]
 
 
-class JSONHandler(asyncore.dispatcher_with_send):
-    def handle_read(self):
-        data = self.recv(8192)
+class PMProtocol(asyncio.Protocol):
+    def connection_made(self, transport):
+        peername = transport.get_extra_info('peername')
+        self.transport = transport
+        self.request = ''
 
-        # convert to string and delete trailing newline and whitespace
-        data = str(data, encoding='utf-8').rstrip()
+    def data_received(self, data):
+        message = data.decode()
+        self.request += message
 
-        if not data:
-            logging.warning('received empty data')
-            return
+    def eof_received(self):
+        logging.info("New JSON request received (%dB)" % len(self.request))
 
-        logging.info("New JSON request received")
-        candidates = process_request(data)
+        candidates = process_request(self.request)
 
         # create JSON string for NEAT logic reply
         j = [policy.properties_to_json(c) for c in candidates]
         candidates_json = '[' + ', '.join(j) + ']\n'
 
-        self.send(candidates_json.encode(encoding='utf-8'))
-
-
-class PMServer(asyncore.dispatcher):
-    def __init__(self, domain_sock):
-        asyncore.dispatcher.__init__(self)
-        self.create_socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.bind(domain_sock)
-        self.listen(5)
-
-    def handle_accepted(self, sock, addr):
-        logging.debug('Incoming connection')
-        handler = JSONHandler(sock)
+        data = candidates_json.encode(encoding='utf-8')
+        self.transport.write(data)
+        self.transport.close()
 
 
 def no_loop_test():
+    """
+    Dummy JSON request for testing
+    """
     test_request_str = '{"remote_ip": {"precedence": 2, "value": "10:54:1.23"}, "transport": {"value": "TCP"}, "MTU": {"value": [1500, Infinity]}, "low_latency": {"precedence": 2, "value": true}}'
     process_request(test_request_str)
-    # import code
-    # code.interact(local=locals(), banner='no loop test')
 
 
 if __name__ == "__main__":
@@ -97,12 +87,22 @@ if __name__ == "__main__":
     profiles = PIB(PIB_DIR, file_extension='.profile')
     pib = PIB(PIB_DIR, file_extension='.policy')
 
-    no_loop_test()
+    # no_loop_test()
 
-    print('Waiting for PM requests...')
-    server = PMServer(DOMAIN_SOCK)
+    loop = asyncio.get_event_loop()
+    # Each client connection creates a new protocol instance
+    coro = loop.create_unix_server(PMProtocol, DOMAIN_SOCK)
+    server = loop.run_until_complete(coro)
+
+    print('Waiting for PM requests on {} ...'.format(server.sockets[0].getsockname()))
     try:
-        asyncore.loop()
+        loop.run_forever()
     except KeyboardInterrupt:
         print("Quitting policy manager.")
-        exit(0)
+        pass
+
+    # Close the server
+    server.close()
+    loop.run_until_complete(server.wait_closed())
+    loop.close()
+    exit(0)
