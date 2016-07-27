@@ -210,6 +210,7 @@ neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, const char *buffer, p
     data->on_pm_reply = cb;
 
     uv_write_t *req = malloc(sizeof(*req));
+    assert(req);
     req->data = data;
 
     uv_buf_t *buf = malloc(sizeof(uv_buf_t));
