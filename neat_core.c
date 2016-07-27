@@ -1509,9 +1509,8 @@ get_property(json_t *json, const char *key, json_type expected_type)
 static void
 build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json, struct neat_he_candidates *candidate_list)
 {
-    size_t i, stack_count;
+    size_t i;
     int if_idx;
-    neat_protocol_stack_type stacks;
     json_t *value;
 
     NEAT_FUNC_TRACE();
@@ -1524,6 +1523,7 @@ build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json, struct neat_he
         const char *interface = NULL;
         const char *local_ip  = NULL;
         const char *remote_ip = NULL;
+        const char *transport = NULL;
 
         // TODO: In the future, we should require to have an interface speficied
         // at this point
@@ -1539,13 +1539,24 @@ build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json, struct neat_he
         if (!local_ip)
             continue;
 
-        stack_count = 1;
-        find_enabled_protocols(value, &stacks, &stack_count);
+        neat_protocol_stack_type stack;
+        transport = json_string_value(get_property(value, "transport", JSON_STRING));
 
-        if (stack_count == 0) {
-            neat_log(NEAT_LOG_DEBUG, "PM Candidate %d specifies no transport protocol, ignoring");
+        if (strcmp(transport, "TCP") == 0)
+            stack = NEAT_STACK_TCP;
+        else if (strcmp(transport, "SCTP") == 0)
+            stack = NEAT_STACK_SCTP;
+        else if (strcmp(transport, "SCTP/UDP") == 0)
+            stack = NEAT_STACK_SCTP_UDP;
+        else if (strcmp(transport, "UDP") == 0)
+            stack = NEAT_STACK_UDP;
+        else if (strcmp(transport, "UDPLite") == 0)
+            stack = NEAT_STACK_UDPLITE;
+        else {
+            neat_log(NEAT_LOG_DEBUG, "Unkown transport stack %s", transport);
             continue;
         }
+
 
         struct neat_he_candidate *candidate = calloc(1, sizeof(*candidate));
         if (!candidate)
@@ -1553,18 +1564,19 @@ build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json, struct neat_he
 
         if_idx = if_nametoindex(interface);
         if (!if_idx) {
-            neat_log(NEAT_LOG_DEBUG, "Unable to get interface id for \"%\"",
+            neat_log(NEAT_LOG_DEBUG, "Unable to get interface id for \"%s\"",
                      interface);
-            continue;
+            if_idx = 0;
         }
 
         candidate->src_address = strdup(local_ip);
         candidate->if_name     = strdup(interface);
         candidate->dst_address = strdup(remote_ip);
         candidate->port        = flow->port;
-        candidate->stack       = stacks;
+        candidate->stack       = stack;
         candidate->if_idx      = if_idx;
         candidate->priority    = i; // TODO: Get priority from PM
+        candidate->properties  = value;
 
         TAILQ_INSERT_TAIL(candidate_list, candidate, next);
     }
@@ -1580,7 +1592,7 @@ on_pm_reply_post_resolve(neat_ctx *ctx, neat_flow *flow, json_t *json)
     assert(ctx);
     assert(flow);
 
-    char *str = json_dumps(json, 0);
+    char *str = json_dumps(json, JSON_INDENT(2));
     neat_log(NEAT_LOG_DEBUG, "Reply from PM was: %s", str);
     free(str);
 
