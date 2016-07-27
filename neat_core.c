@@ -1615,6 +1615,9 @@ on_candidates_resolved(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates
     struct neat_he_candidate *candidate;
     NEAT_FUNC_TRACE();
 
+    // TODO: This fails: assert(ctx);
+    assert(flow);
+
     // Now that the names in the list are resolved, append the new data to the
     // json objects and perform a new call to the PM
 
@@ -1636,7 +1639,7 @@ on_candidates_resolved(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates
 
     buffer = json_dumps(array, JSON_INDENT(2));
     neat_log(NEAT_LOG_DEBUG, "Sending post-resolve properties to PM\n%s\n", buffer);
-    neat_pm_send(ctx, flow, buffer, on_pm_reply_post_resolve);
+    neat_pm_send(flow->ctx, flow, buffer, on_pm_reply_post_resolve);
 }
 
 struct candidate_resolver_data
@@ -1898,6 +1901,7 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port,
     flow->port = port;
     flow->propertyAttempt = flow->propertyMask;
     flow->stream_count = stream_count;
+    flow->ctx = mgr;
 
     json_t *address = json_pack("{ss}", "value", name);
     json_object_set(flow->properties, "domain_name", address);
