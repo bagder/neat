@@ -84,8 +84,6 @@ complete_message:
     data->on_pm_reply(data->ctx, data->flow, json);
 
 end:
-    uv_read_stop(stream);
-    neat_pm_socket_close(data->ctx, data->flow, stream);
     free(data);
 }
 
