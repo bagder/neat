@@ -28,7 +28,7 @@ struct neat_pm_request_data {
 };
 
 static void
-on_close()
+on_pm_socket_close(uv_handle_t* handle)
 {
     NEAT_FUNC_TRACE();
 }
@@ -48,7 +48,7 @@ on_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
 
         neat_log(NEAT_LOG_DEBUG, "Done reading", nread);
         uv_read_stop(stream);
-        uv_close((uv_handle_t*)stream, on_close);
+        uv_close((uv_handle_t*)stream, on_pm_socket_close);
 
         json = json_loadb(data->read_buffer, data->buffer_size, 0, &error);
         if (!json) {
