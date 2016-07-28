@@ -461,7 +461,6 @@ neat_set_property_json(neat_ctx *mgr, neat_flow *flow, const char *properties)
 {
     json_t *props;
     json_error_t error;
-    char *buffer;
 
     NEAT_FUNC_TRACE();
 
@@ -491,9 +490,11 @@ neat_set_property_json(neat_ctx *mgr, neat_flow *flow, const char *properties)
         }
     }
 
-    buffer = json_dumps(flow->properties, JSON_INDENT(2));
+#if 0
+    char *buffer = json_dumps(flow->properties, JSON_INDENT(2));
     neat_log(NEAT_LOG_DEBUG, "Flow properties are now:\n%s\n", buffer);
     free(buffer);
+#endif
 
     return NEAT_OK;
 }
@@ -1587,9 +1588,13 @@ on_pm_reply_post_resolve(neat_ctx *ctx, neat_flow *flow, json_t *json)
     assert(ctx);
     assert(flow);
 
+#if 0
     char *str = json_dumps(json, JSON_INDENT(2));
     neat_log(NEAT_LOG_DEBUG, "Reply from PM was: %s", str);
     free(str);
+#else
+    neat_log(NEAT_LOG_DEBUG, "Received reply from PM");
+#endif
 
     candidate_list = calloc(1, sizeof(*candidate_list));
     assert(candidate_list);
@@ -1633,7 +1638,11 @@ on_candidates_resolved(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates
     }
 
     buffer = json_dumps(array, JSON_INDENT(2));
+#if 0
     neat_log(NEAT_LOG_DEBUG, "Sending post-resolve properties to PM\n%s\n", buffer);
+#else
+    neat_log(NEAT_LOG_DEBUG, "Sending post-resolve properties to PM");
+#endif
     neat_pm_send(flow->ctx, flow, buffer, on_pm_reply_post_resolve);
 }
 
@@ -1791,8 +1800,11 @@ send_properties_to_pm(neat_ctx *ctx, neat_flow *flow)
 
     buffer = json_dumps(array, JSON_INDENT(2));
 
+#if 1
+    neat_log(NEAT_LOG_DEBUG, "Sending properties to PM:\n%s\n", buffer);
+#else
     neat_log(NEAT_LOG_DEBUG, "Sending properties to PM");
-    neat_log(NEAT_LOG_DEBUG, "\n%s", buffer);
+#endif
 
     neat_pm_send(ctx, flow, buffer, on_pm_reply_pre_resolve);
 }

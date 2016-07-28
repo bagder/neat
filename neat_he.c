@@ -188,7 +188,6 @@ he_resolve_cb(struct neat_resolver_results *results,
 neat_error_code
 neat_he_open(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates *candidate_list, uv_poll_cb callback_fx)
 {
-    char *str;
     const char *proto;
     size_t i;
     const char *family;
@@ -237,10 +236,12 @@ neat_he_open(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates *candidat
                  candidate->port,
                  candidate->priority);
 
-        str = json_dumps(candidate->properties, JSON_INDENT(2));
+#if 0
+        char *str = json_dumps(candidate->properties, JSON_INDENT(2));
         neat_log(NEAT_LOG_DEBUG, "Properties:\n%s", str);
 
         free(str);
+#endif
     }
 
     // neat_free_candidates(candidates);

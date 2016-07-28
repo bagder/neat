@@ -58,16 +58,16 @@ on_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
 
             // TODO: Handle this error
 
-            return;
+            goto end;
         }
 
         data->on_pm_reply(data->ctx, data->flow, json);
-        return;
+        goto end;
     }
 
     if (nread < 0) {
         neat_log(NEAT_LOG_DEBUG, "Error");
-        return;
+        goto end;
     }
 
     neat_log(NEAT_LOG_DEBUG, "Received %d bytes", nread);
@@ -79,6 +79,9 @@ on_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
     assert(data->read_buffer);
     memcpy(data->read_buffer + data->buffer_size, buf->base, nread);
     data->buffer_size += nread;
+end:
+    if (buf->base && buf->len)
+        free(buf->base);
 }
 
 static void
