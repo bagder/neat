@@ -1777,12 +1777,20 @@ on_pm_timeout()
 }
 
 static void
-on_pm_connected_cb(neat_ctx *ctx, neat_flow *flow)
+send_properties_to_pm(neat_ctx *ctx, neat_flow *flow)
 {
     char *buffer;
+    json_t *array;
     NEAT_FUNC_TRACE();
 
-    buffer = json_dumps(flow->properties, JSON_INDENT(2));
+    assert(ctx);
+    assert(flow);
+
+    array = json_array();
+    assert(array);
+    json_array_append(array, flow->properties);
+
+    buffer = json_dumps(array, JSON_INDENT(2));
 
     neat_log(NEAT_LOG_DEBUG, "Sending properties to PM");
     neat_log(NEAT_LOG_DEBUG, "\n%s", buffer);
@@ -1906,12 +1914,8 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port,
     json_t *address = json_pack("{ss}", "value", name);
     json_object_set(flow->properties, "domain_name", address);
 
-#if 1
-    neat_pm_socket_connect(mgr, flow, on_pm_connected_cb);
+    send_properties_to_pm(mgr, flow);
     return NEAT_OK;
-#else
-    return neat_he_lookup(mgr, flow, he_connected_cb);
-#endif
 }
 
 neat_error_code

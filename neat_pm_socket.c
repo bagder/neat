@@ -17,74 +17,68 @@ struct neat_pm_connect_data {
 };
 
 
-struct neat_pm_read_data {
+struct neat_pm_request_data {
     struct neat_ctx *ctx;
     struct neat_flow *flow;
     pm_reply_callback on_pm_reply;
+    char *output_buffer;
     char *read_buffer;
     size_t buffer_size;
     ssize_t nesting_count;
 };
 
 static void
+on_close()
+{
+    NEAT_FUNC_TRACE();
+}
+
+static void
 on_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
 {
-    json_t *json;
-    json_error_t error;
-    struct neat_pm_read_data *data = stream->data;
+    struct neat_pm_request_data *data = stream->data;
 
-    assert(nread > 0);
-    assert(nread != UV_EOF);
+    NEAT_FUNC_TRACE();
 
-    unsigned int current_nesting = data->nesting_count;
-    for (ssize_t i = 0; i < nread; ++i) {
-        if (buf->base[i] == '{' || buf->base[i] == '[') {
-            current_nesting++;
-        } else if (buf->base[i] == '}' || buf->base[i] == ']') {
-            current_nesting--;
+    // assert(nread > 0);
+    // assert(nread != UV_EOF);
+    if (nread == UV_EOF) {
+        json_t *json;
+        json_error_t error;
+
+        neat_log(NEAT_LOG_DEBUG, "Done reading", nread);
+        uv_read_stop(stream);
+        uv_close((uv_handle_t*)stream, on_close);
+
+        json = json_loadb(data->read_buffer, data->buffer_size, 0, &error);
+        if (!json) {
+            neat_log(NEAT_LOG_DEBUG, "Failed to read JSON reply from PM");
+            neat_log(NEAT_LOG_DEBUG, "Error at position %d:", error.position);
+            neat_log(NEAT_LOG_DEBUG, error.text);
+
+            // TODO: Handle this error
+
+            return;
         }
-    }
-    // neat_log(NEAT_LOG_DEBUG, "Current nesting: %d", current_nesting);
 
-    // Check if we have read everything in one go
-    if (current_nesting == 0 && data->buffer_size == 0) {
-        data->read_buffer = buf->base;
-        data->buffer_size = nread;
-        data->nesting_count = -1; // Don't free data->read_buffer at the end
-        goto complete_message;
+        data->on_pm_reply(data->ctx, data->flow, json);
+        return;
     }
 
-    data->nesting_count = current_nesting;
+    if (nread < 0) {
+        neat_log(NEAT_LOG_DEBUG, "Error");
+        return;
+    }
+
+    neat_log(NEAT_LOG_DEBUG, "Received %d bytes", nread);
+
+    assert(data);
+
+    // data->nesting_count = current_nesting;
     data->read_buffer = realloc(data->read_buffer, data->buffer_size + nread);
     assert(data->read_buffer);
     memcpy(data->read_buffer + data->buffer_size, buf->base, nread);
     data->buffer_size += nread;
-
-    // Check if this is the last part of a JSON message. If it's not, return and
-    // wait for the next part.
-    if (current_nesting) {
-        neat_log(NEAT_LOG_DEBUG, "Received paratial JSON message, %zu + %zu = %zi",
-                 data->buffer_size - nread, nread, data->buffer_size);
-        free(buf->base);
-        return;
-    }
-complete_message:
-    neat_log(NEAT_LOG_DEBUG, "on_read pm, got %d bytes", data->buffer_size);
-
-    json = json_loadb(data->read_buffer, data->buffer_size, 0, &error);
-    if (!json) {
-        neat_log(NEAT_LOG_DEBUG, "Failed to read JSON reply from PM");
-        neat_log(NEAT_LOG_DEBUG, "Error at position %d:", error.position);
-        neat_log(NEAT_LOG_DEBUG, error.text);
-        goto end;
-    }
-
-    free(buf->base);
-
-    data->on_pm_reply(data->ctx, data->flow, json);
-
-end:
-    free(data);
 }
 
 static void
@@ -99,19 +93,29 @@ on_request_alloc(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
 static void
 on_written(uv_write_t* wr, int status)
 {
+    uv_os_fd_t fd;
     neat_log(NEAT_LOG_DEBUG, "on_written, status %d", status);
 
-    struct neat_pm_read_data *data = wr->data;
-    data->flow->pm_context->pm_handle->data = wr->data;
-    uv_read_start(data->flow->pm_context->pm_handle, on_request_alloc, on_read);
+    // struct neat_pm_request_data *data = wr->data;
+    // data->flow->pm_context->pm_handle->data = wr->data;
+    // uv_shutdown_t *req = malloc(sizeof(*req));
+    // assert(req);
 
-    free(wr);
+    uv_read_start(wr->handle, on_request_alloc, on_read);
+    wr->handle->data = wr->data;
+
+    // -------------- HACK! -----------------
+    uv_fileno((uv_handle_t*)wr->handle, &fd);
+    shutdown(fd, SHUT_WR);
+    // --------------------------------------
+
+    // free(wr);
 }
 
 static void
 on_pm_connected(uv_connect_t* req, int status)
 {
-    struct neat_pm_connect_data *data = req->data;
+    struct neat_pm_request_data *data = req->data;
 
     NEAT_FUNC_TRACE();
 
@@ -133,8 +137,19 @@ on_pm_connected(uv_connect_t* req, int status)
         goto error;
     }
 
-    data->flow->pm_context->pm_handle = req->handle;
-    data->on_pm_connected(data->ctx, data->flow);
+    uv_write_t *wr = malloc(sizeof(*wr));
+    assert(wr);
+    // wr->handle = req->handle;
+
+    uv_buf_t *buf = malloc(sizeof(uv_buf_t));
+
+    buf->base = data->output_buffer;
+    buf->len = strlen(buf->base);
+
+    wr->data = data;
+    uv_write(wr, req->handle, buf, 1, on_written);
+
+    // data->flow->pm_context->pm_handle = wr->handle;
 
 error:
     free(req);
@@ -153,18 +168,7 @@ neat_pm_socket_connect(neat_ctx *ctx, neat_flow *flow, pm_callback cb)
     // TODO: Move this malloc to neat_flow_init
     flow->pm_context = malloc(sizeof(struct neat_pm_context));
 
-    uv_connect_t *connect = malloc(sizeof(uv_connect_t));
-
     uv_pipe_init(ctx->loop, &flow->pm_context->pm_pipe, 1 /* 1 => IPC = TRUE */);
-
-    struct neat_pm_connect_data *data = malloc(sizeof(*data));
-    assert(data);
-
-    data->ctx = ctx;
-    data->flow = flow;
-    data->on_pm_connected = cb;
-
-    connect->data = data;
 
     socket_path = getenv("NEAT_PM_SOCKET");
     if (!socket_path) {
@@ -177,16 +181,9 @@ neat_pm_socket_connect(neat_ctx *ctx, neat_flow *flow, pm_callback cb)
             neat_log(NEAT_LOG_DEBUG, "Unable to construct default path to PM socket");
             return NEAT_ERROR_INTERNAL;
         }
-
-        socket_path = buffer;
     }
 
-    // TODO: check that path is < sizeof(sockaddr_un.sun_path) ?
-
-    uv_pipe_connect(connect,
-                    &flow->pm_context->pm_pipe,
-                    socket_path,
-                    on_pm_connected);
+    flow->pm_context->pm_path = strdup(buffer);
 
     return NEAT_OK;
 }
@@ -198,34 +195,35 @@ neat_pm_socket_close(struct neat_ctx *ctx, struct neat_flow *flow, uv_stream_t *
 }
 
 neat_error_code
-neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, const char *buffer, pm_reply_callback cb)
+neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, char *buffer, pm_reply_callback cb)
 {
+    struct neat_pm_request_data *data;
+    uv_connect_t *connect = malloc(sizeof(uv_connect_t));
+
     NEAT_FUNC_TRACE();
 
+    neat_pm_socket_connect(ctx, flow, NULL);
+
+    assert(ctx);
+    assert(flow);
     assert(buffer);
 
-    struct neat_pm_read_data *data = calloc(1, sizeof(*data));
+    data = malloc(sizeof(*data));
+    assert(data);
+
     data->ctx = ctx;
     data->flow = flow;
+    data->output_buffer = buffer;
     data->on_pm_reply = cb;
+    data->read_buffer = NULL;
+    data->buffer_size = 0;
 
-    uv_write_t *req = malloc(sizeof(*req));
-    assert(req);
-    req->data = data;
+    connect->data = data;
 
-    uv_buf_t *buf = malloc(sizeof(uv_buf_t));
-
-    buf->base = (char*)buffer;
-    buf->len = strlen(buffer);
-
-    uv_write(req, flow->pm_context->pm_handle, buf, 1, on_written);
-
-    return NEAT_OK;
-}
-
-neat_error_code
-neat_pm_recv(neat_ctx *ctx, neat_flow *flow)
-{
+    uv_pipe_connect(connect,
+                    &flow->pm_context->pm_pipe,
+                    flow->pm_context->pm_path,
+                    on_pm_connected);
 
     return NEAT_OK;
 }

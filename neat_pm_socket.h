@@ -12,13 +12,14 @@ typedef void (*pm_reply_callback)(struct neat_ctx *ctx, struct neat_flow *flow, 
 struct neat_pm_context {
     uv_pipe_t pm_pipe;
     uv_stream_t *pm_handle;
+    char *pm_path;
 };
 
 struct neat_pm_request {
     uv_handle_t handle;
 };
 
-neat_error_code neat_pm_socket_connect(struct neat_ctx *ctx, struct neat_flow *flow, pm_callback cb);
-neat_error_code neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, const char *buffer, pm_reply_callback cb);
+// neat_error_code neat_pm_socket_connect(struct neat_ctx *ctx, struct neat_flow *flow, pm_callback cb);
+neat_error_code neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, char *buffer, pm_reply_callback cb);
 
 #endif /* ifndef NEAT_PM_SOCKET_INCLUDE */
