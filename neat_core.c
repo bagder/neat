@@ -1515,9 +1515,6 @@ build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json, struct neat_he
 
     NEAT_FUNC_TRACE();
 
-    /* This is only an initial implementation. I expect this to change once the
-     * protocol between PM and NEAT logic evolves
-     */
     json_array_foreach(json, i, value) {
         neat_log(NEAT_LOG_DEBUG, "Now processing PM candidate %zu", i);
         const char *interface = NULL;
@@ -1525,8 +1522,6 @@ build_he_candidates(neat_ctx *ctx, neat_flow *flow, json_t *json, struct neat_he
         const char *remote_ip = NULL;
         const char *transport = NULL;
 
-        // TODO: In the future, we should require to have an interface speficied
-        // at this point
         interface = json_string_value(get_property(value, "interface", JSON_STRING));
         if (!interface)
             continue;
@@ -1723,14 +1718,18 @@ on_pm_reply_pre_resolve(neat_ctx *ctx, neat_flow *flow, json_t *json)
     assert(ctx);
     assert(flow);
 
+#if 0
     char *buffer = json_dumps(json, JSON_INDENT(2));
     neat_log(NEAT_LOG_DEBUG, "Received reply from PM\n%s\n", buffer);
     free(buffer);
+#else
+    neat_log(NEAT_LOG_DEBUG, "Received reply from PM");
+#endif
 
     // By now, we know which interface(s) to perform name resolution on.
-    // The next step is to have HE resolve the names if necessary.
-    // Once HE has performed the name resolution, we send a second call to the
-    // PM to apply further policies based on results of the name resolution.
+    // The next step is to resolve the names. Once the name resolution
+    // has completed we send a second call to the PM to apply further policies
+    // based on results of the name resolution.
 
     candidate_list = calloc(1, sizeof(*candidate_list));
     assert(candidate_list);
