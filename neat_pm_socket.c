@@ -8,18 +8,6 @@
 #include <jansson.h>
 #include <assert.h>
 
-#define ENABLE_WRITE
-// #define USE_TEST_STRING
-
-// Uncomment this to read a single reply only from the PM
-
-#ifdef ENABLE_WRITE
-uv_buf_t buf[1];
-#if defined(USE_TEST_STRING)
-static const char* test_string = "{\"MTU\": {\"value\": [1500, Infinity]}, \"low_latency\": {\"precedence\": 2, \"value\": true}, \"remote_ip\": {\"precedence\": 2, \"value\": \"10.1.23.45\"}, \"transport_TCP\": {\"value\": true}}";
-#endif
-#endif
-
 static void neat_pm_socket_close(struct neat_ctx *ctx, struct neat_flow *flow, uv_stream_t *handle);
 
 struct neat_pm_connect_data {
@@ -96,8 +84,6 @@ complete_message:
     data->on_pm_reply(data->ctx, data->flow, json);
 
 end:
-    uv_read_stop(stream);
-    neat_pm_socket_close(data->ctx, data->flow, stream);
     free(data);
 }
 
@@ -114,10 +100,6 @@ static void
 on_written(uv_write_t* wr, int status)
 {
     neat_log(NEAT_LOG_DEBUG, "on_written, status %d", status);
-
-#if !defined(USE_TEST_STRING)
-    free(buf[0].base);
-#endif
 
     struct neat_pm_read_data *data = wr->data;
     data->flow->pm_context->pm_handle->data = wr->data;
@@ -228,15 +210,13 @@ neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, const char *buffer, p
     data->on_pm_reply = cb;
 
     uv_write_t *req = malloc(sizeof(*req));
+    assert(req);
     req->data = data;
 
-#ifdef USE_TEST_STRING
-    buf[0].base = (char*)test_string;
-    buf[0].len = strlen(test_string);
-#else
-    buf[0].base = (char*)buffer;
-    buf[0].len = strlen(buffer);
-#endif
+    uv_buf_t *buf = malloc(sizeof(uv_buf_t));
+
+    buf->base = (char*)buffer;
+    buf->len = strlen(buffer);
 
     uv_write(req, flow->pm_context->pm_handle, buf, 1, on_written);
 
