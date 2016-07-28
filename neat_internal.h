@@ -297,6 +297,8 @@ struct neat_he_candidate {
 
 TAILQ_HEAD(neat_he_candidates, neat_he_candidate);
 
+void neat_free_candidates(struct neat_he_candidates *candidates);
+
 // Connect context needed during HE.
 struct he_cb_ctx {
     uv_poll_t *handle;

@@ -31,6 +31,7 @@ static void
 on_pm_socket_close(uv_handle_t* handle)
 {
     NEAT_FUNC_TRACE();
+    free(handle);
 }
 
 static void
@@ -62,6 +63,10 @@ on_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
         }
 
         data->on_pm_reply(data->ctx, data->flow, json);
+
+        free(data->read_buffer);
+        free(data);
+
         goto end;
     }
 
@@ -99,7 +104,7 @@ on_written(uv_write_t* wr, int status)
     uv_os_fd_t fd;
     neat_log(NEAT_LOG_DEBUG, "on_written, status %d", status);
 
-    // struct neat_pm_request_data *data = wr->data;
+    struct neat_pm_request_data *data = wr->data;
     // data->flow->pm_context->pm_handle->data = wr->data;
     // uv_shutdown_t *req = malloc(sizeof(*req));
     // assert(req);
@@ -112,7 +117,9 @@ on_written(uv_write_t* wr, int status)
     shutdown(fd, SHUT_WR);
     // --------------------------------------
 
-    // free(wr);
+    free(wr);
+
+    free(data->output_buffer);
 }
 
 static void
@@ -142,7 +149,6 @@ on_pm_connected(uv_connect_t* req, int status)
 
     uv_write_t *wr = malloc(sizeof(*wr));
     assert(wr);
-    // wr->handle = req->handle;
 
     uv_buf_t *buf = malloc(sizeof(uv_buf_t));
 

@@ -244,7 +244,11 @@ neat_he_open(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates *candidat
 #endif
     }
 
-    // neat_free_candidates(candidates);
+    // TODO: Remove this.
+    // The candidate list should be provided to he_connected_cb so that it may
+    // be freed there.
+    neat_free_candidates(candidate_list);
+
     return NEAT_ERROR_OK;
 }
 

@@ -67,7 +67,6 @@ static void neat_sctp_init_events(struct socket *sock);
 #else
 static void neat_sctp_init_events(int sock);
 #endif
-static void neat_free_candidates(struct neat_he_candidates *candidates);
 
 static neat_flow * do_accept(neat_ctx *ctx, neat_flow *flow);
 neat_flow * neat_find_flow(neat_ctx *, struct sockaddr *, struct sockaddr *);
@@ -1604,18 +1603,22 @@ on_pm_reply_post_resolve(neat_ctx *ctx, neat_flow *flow, json_t *json)
 
     neat_he_open(ctx, flow, candidate_list, he_connected_cb);
 
-    // TODO: Keep properties around after HE?
-    json_decref(json);
+#if 0
+    // Deallocation test
+    neat_free_flow(flow);
+    neat_core_cleanup(ctx);
+    exit(0);
+#endif
 }
 
 static void
 on_candidates_resolved(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates *candidate_list)
 {
     char *buffer;
-    struct neat_he_candidate *candidate;
+    struct neat_he_candidate *candidate, *tmp;
     NEAT_FUNC_TRACE();
 
-    // TODO: This fails: assert(ctx);
+    assert(ctx);
     assert(flow);
 
     // Now that the names in the list are resolved, append the new data to the
@@ -1623,7 +1626,7 @@ on_candidates_resolved(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates
 
     json_t *array = json_array();
 
-    TAILQ_FOREACH(candidate, candidate_list, next) {
+    TAILQ_FOREACH_SAFE(candidate, candidate_list, next, tmp) {
         json_t *dst_address, *str;
 
         //dst_address = json_pack();
@@ -1635,6 +1638,10 @@ on_candidates_resolved(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates
         json_object_set(candidate->properties, "dst_address", dst_address);
 
         json_array_append(array, candidate->properties);
+
+        // We're done with dst_address and str in this function.
+        json_decref(dst_address);
+        json_decref(str);
     }
 
     buffer = json_dumps(array, JSON_INDENT(2));
@@ -1644,6 +1651,9 @@ on_candidates_resolved(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates
     neat_log(NEAT_LOG_DEBUG, "Sending post-resolve properties to PM");
 #endif
     neat_pm_send(flow->ctx, flow, buffer, on_pm_reply_post_resolve);
+
+    json_decref(array);
+    neat_free_candidates(candidate_list);
 }
 
 struct candidate_resolver_data
@@ -1676,7 +1686,11 @@ on_candidate_resolved(struct neat_resolver_results *results,
 
     if (!--*data->remaining /*&& *data->status == 0*/) {
         on_candidates_resolved(data->flow->ctx, data->flow, data->candidate_list);
+        free(data->status);
+        free(data->remaining);
     }
+
+    free(data);
 }
 
 static void
@@ -1746,8 +1760,8 @@ on_pm_reply_pre_resolve(neat_ctx *ctx, neat_flow *flow, json_t *json)
 
     json_array_foreach(json, i, value) {
         const char *address = NULL;
-        // const char *interface = NULL;
-        // const char *local_ip  = NULL;
+        const char *interface = NULL;
+        const char *local_ip  = NULL;
         struct neat_he_candidate *candidate;
 
         candidate = calloc(1, sizeof(*candidate));
@@ -1756,7 +1770,6 @@ on_pm_reply_pre_resolve(neat_ctx *ctx, neat_flow *flow, json_t *json)
         if (!address)
             continue;
 
-        /*
         interface = json_string_value(get_property(value, "interface", JSON_STRING));
         if (!interface)
             continue;
@@ -1764,18 +1777,19 @@ on_pm_reply_pre_resolve(neat_ctx *ctx, neat_flow *flow, json_t *json)
         local_ip = json_string_value(get_property(value, "local_ip", JSON_STRING));
         if (!local_ip)
             continue;
-        */
 
-        candidate->dst_address = address;
-        // candidate->if_name = (char*)interface;
-        // candidate->src_address = (char*)local_ip;
-        candidate->properties = value;
+        candidate->dst_address = strdup(address);
+        candidate->if_name = strdup(interface);
+        candidate->src_address = strdup(local_ip);
         candidate->port = flow->port;
+        candidate->properties = value;
+        json_incref(value);
 
         TAILQ_INSERT_TAIL(candidate_list, candidate, next);
     }
 
     neat_resolve_candidates(ctx, flow, candidate_list);
+    json_decref(json);
 }
 
 static void
@@ -1807,6 +1821,7 @@ send_properties_to_pm(neat_ctx *ctx, neat_flow *flow)
 #endif
 
     neat_pm_send(ctx, flow, buffer, on_pm_reply_pre_resolve);
+    json_decref(array);
 }
 
 /* neat_candidates_fallback generates all possible candidates when the PM is not
@@ -1881,15 +1896,19 @@ neat_candidates_fallback(neat_flow *flow, uint16_t port,
     return NEAT_OK;
 }
 
-static void
+void
 neat_free_candidates(struct neat_he_candidates *candidates)
 {
     struct neat_he_candidate *candidate, *tmp;
     TAILQ_FOREACH_SAFE(candidate, candidates, next, tmp) {
+        free((void*)candidate->dst_address);
         free(candidate->src_address);
         free(candidate->if_name);
+        json_decref(candidate->properties);
         free(candidate);
     }
+
+    free(candidates);
 }
 
 neat_error_code
