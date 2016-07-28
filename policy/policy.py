@@ -59,9 +59,12 @@ def json_to_properties(json_str):
         property_dict = json.loads(json_str)
     except json.decoder.JSONDecodeError as e:
         logging.error(json_str + ' is not a valid JSON string: ' + str(e))
-        return
+        raise InvalidPropertyError('invalid JSON string: ' + str(e))
 
-    return dict_to_properties(property_dict)
+    property_array_list=[]
+    for pa in property_dict:
+        property_array_list.append(dict_to_properties(pa))
+    return property_array_list
 
 
 def properties_to_json(property_array, indent=None, with_score=False):
@@ -297,9 +300,9 @@ class PropertyArray(dict):
                 else:
                     self[property.key] = property
             else:
-                logging.error(
-                    "only NEATProperty objects may be added to PropertyDict: received %s instead" % type(property))
-                return
+                logging.error("only NEATProperty objects may be added to PropertyDict: received %s instead" % type(property))
+                raise NEATPropertyError("cannot add %s" % type(property))
+
 
     def __add__(self, other):
         diff = self ^ other
