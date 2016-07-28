@@ -154,41 +154,11 @@ on_pm_connected(uv_connect_t* req, int status)
 
     // data->flow->pm_context->pm_handle = wr->handle;
 
+    free(buf);
 error:
     free(req);
-    free(data);
-}
-
-neat_error_code
-neat_pm_socket_connect(neat_ctx *ctx, neat_flow *flow, pm_callback cb)
-{
-    const char *socket_path;
-    const char *home_dir;
-    char buffer[128];
-
-    NEAT_FUNC_TRACE();
-
-    // TODO: Move this malloc to neat_flow_init
-    flow->pm_context = malloc(sizeof(struct neat_pm_context));
-
-    uv_pipe_init(ctx->loop, &flow->pm_context->pm_pipe, 1 /* 1 => IPC = TRUE */);
-
-    socket_path = getenv("NEAT_PM_SOCKET");
-    if (!socket_path) {
-        if ((home_dir = getenv("HOME")) == NULL) {
-            neat_log(NEAT_LOG_DEBUG, "Unable to locate the $HOME directory");
-            return NEAT_ERROR_INTERNAL;
-        }
-
-        if (snprintf(buffer, 128, "%s/.neat/neat_pm_socket", home_dir) < 0) {
-            neat_log(NEAT_LOG_DEBUG, "Unable to construct default path to PM socket");
-            return NEAT_ERROR_INTERNAL;
-        }
-    }
-
-    flow->pm_context->pm_path = strdup(buffer);
-
-    return NEAT_OK;
+    // free(data);
+    return;
 }
 
 void
@@ -200,12 +170,15 @@ neat_pm_socket_close(struct neat_ctx *ctx, struct neat_flow *flow, uv_stream_t *
 neat_error_code
 neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, char *buffer, pm_reply_callback cb)
 {
+    const char *home_dir;
+    // char buffer[128];
+    char socket_path_buf[128];
+    const char *socket_path;
     struct neat_pm_request_data *data;
     uv_connect_t *connect = malloc(sizeof(uv_connect_t));
+    uv_pipe_t *pipe = malloc(sizeof(uv_pipe_t));
 
     NEAT_FUNC_TRACE();
-
-    neat_pm_socket_connect(ctx, flow, NULL);
 
     assert(ctx);
     assert(flow);
@@ -223,9 +196,29 @@ neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, char *buffer, pm_repl
 
     connect->data = data;
 
+    // TODO: Move this malloc to neat_flow_init
+    // flow->pm_context = malloc(sizeof(struct neat_pm_context));
+
+    uv_pipe_init(ctx->loop, pipe, 1 /* 1 => IPC = TRUE */);
+
+    socket_path = getenv("NEAT_PM_SOCKET");
+    if (!socket_path) {
+        if ((home_dir = getenv("HOME")) == NULL) {
+            neat_log(NEAT_LOG_DEBUG, "Unable to locate the $HOME directory");
+            return NEAT_ERROR_INTERNAL;
+        }
+
+        if (snprintf(socket_path_buf, 128, "%s/.neat/neat_pm_socket", home_dir) < 0) {
+            neat_log(NEAT_LOG_DEBUG, "Unable to construct default path to PM socket");
+            return NEAT_ERROR_INTERNAL;
+        }
+    }
+
+    // flow->pm_context->pm_path = strdup(buffer);
+
     uv_pipe_connect(connect,
-                    &flow->pm_context->pm_pipe,
-                    flow->pm_context->pm_path,
+                    pipe,
+                    socket_path_buf,
                     on_pm_connected);
 
     return NEAT_OK;

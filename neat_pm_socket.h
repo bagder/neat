@@ -11,8 +11,8 @@ typedef void (*pm_reply_callback)(struct neat_ctx *ctx, struct neat_flow *flow, 
 
 struct neat_pm_context {
     uv_pipe_t pm_pipe;
-    uv_stream_t *pm_handle;
-    char *pm_path;
+    // uv_stream_t *pm_handle;
+    // char *pm_path;
 };
 
 struct neat_pm_request {
