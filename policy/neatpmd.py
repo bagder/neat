@@ -25,40 +25,50 @@ def process_request(json_str, num_candidates=10):
     """Process JSON requests from NEAT logic"""
     logging.debug(json_str)
 
-    properties = policy.json_to_properties(json_str)
-    if not properties:
+    candidates = []
+    requests = []
+
+    try:
+        properties_list = policy.json_to_properties(json_str)
+    except policy.InvalidPropertyError:
         return
 
-    request = PropertyArray(*properties)
-    print('Received NEAT request: %s' % request)
-
-
+    try:
+        for req in properties_list:
+            pa = PropertyArray(*req)
+            print('Received NEAT request: %s' % pa)
+            requests.append(pa)
+    except policy.NEATPropertyError as e:
+        print(e)
+        return
 
     # main lookup sequence
-    print('Profile lookup...')
-    updated_requests = profiles.lookup(request)
+    for i, request in enumerate(requests):
+        logging.info("processing request %d/%d" % (i+1, len(requests)))
+        current_candidates = []
 
-    candidates = []
-    print('CIB lookup...')
-    for ur in updated_requests:
-        candidates.extend(cib.lookup(ur))
+        print('Profile lookup...')
+        updated_requests = profiles.lookup(request)
 
-    print('PIB lookup...')
-    updated_candidates = []
-    for candidate in candidates:
-        updated_candidates.extend(pib.lookup(candidate))
+        print('CIB lookup...')
+        for ur in updated_requests:
+            current_candidates.extend(cib.lookup(ur))
 
-    updated_candidates.sort(key=attrgetter('score'), reverse=True)
+        print('PIB lookup...')
+        for candidate in current_candidates:
+            candidates.extend(pib.lookup(candidate))
+
+    candidates.sort(key=attrgetter('score'), reverse=True)
     logging.info("%d candidates generated" % len(candidates))
-    for candidate in updated_candidates:
+    for candidate in candidates:
         print(candidate, candidate.score)
     # TODO check if candidates contain the minimum src/dst/transport tuple
-    return updated_candidates[:num_candidates]
+    return candidates[:num_candidates]
 
 
 class PMProtocol(asyncio.Protocol):
     def connection_made(self, transport):
-        peername = transport.get_extra_info('peername')
+        peername = transport.get_extra_info('sockname')
         self.transport = transport
         self.request = ''
 
