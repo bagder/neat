@@ -1829,14 +1829,14 @@ send_properties_to_pm(neat_ctx *ctx, neat_flow *flow)
  * source address, and protocol.
  */
 static neat_error_code
-neat_candidates_fallback(neat_flow *flow, uint16_t port,
-                         struct neat_he_candidates *candidates)
+neat_candidates_fallback(neat_ctx *ctx, neat_flow *flow)
 {
     uint8_t      nr_of_stacks;
     int          n, s, family;
     char         host[NI_MAXHOST];
     unsigned int if_idx;
 
+    struct neat_he_candidates *candidates;
     struct ifaddrs          *ifaddrs, *ifa;
     neat_protocol_stack_type stacks[NEAT_STACK_MAX_NUM];
 
@@ -1845,6 +1845,12 @@ neat_candidates_fallback(neat_flow *flow, uint16_t port,
     nr_of_stacks = neat_property_translate_protocols(flow->propertyMask, stacks);
     if (nr_of_stacks == 0)
         return NEAT_ERROR_UNABLE;
+
+    if ((candidates = calloc(1, sizeof(*candidates))) == NULL) {
+        return NEAT_ERROR_INTERNAL;
+    }
+
+    TAILQ_INIT(candidates);
 
     if (getifaddrs(&ifaddrs) < 0) {
         neat_log(NEAT_LOG_DEBUG, "getifaddrs: %s", strerror(errno));
@@ -1881,7 +1887,7 @@ neat_candidates_fallback(neat_flow *flow, uint16_t port,
                 candidate->src_address = strdup(host);
                 candidate->if_name     = strdup(ifa->ifa_name);
                 candidate->dst_address = flow->name;
-                candidate->port        = port;
+                candidate->port        = flow->port;
                 candidate->stack       = stacks[i];
                 candidate->if_idx      = if_idx;
                 candidate->family      = family;
@@ -1892,6 +1898,8 @@ neat_candidates_fallback(neat_flow *flow, uint16_t port,
     }
 
     freeifaddrs(ifaddrs);
+
+    neat_he_open(flow->ctx, flow, candidates, he_connected_cb);
 
     return NEAT_OK;
 }
@@ -1944,7 +1952,11 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port,
     json_t *address = json_pack("{ss}", "value", name);
     json_object_set(flow->properties, "domain_name", address);
 
+#if 0
     send_properties_to_pm(mgr, flow);
+#else
+    neat_candidates_fallback(mgr, flow);
+#endif
     return NEAT_OK;
 }
 
