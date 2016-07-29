@@ -164,6 +164,7 @@ struct neat_flow
     struct neat_ctx *ctx; // raw convenience pointer
     uv_poll_t *handle;
     struct neat_iofilter *iofilters;
+    uint32_t group;
 
     size_t writeLimit;  // maximum to write if the socket supports partial writes
     size_t writeSize;   // send buffer size

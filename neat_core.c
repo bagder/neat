@@ -80,6 +80,7 @@ const char *neat_tag_name[NEAT_TAG_LAST] = {
     TAG_STRING(NEAT_TAG_UNORDERED_SEQNUM),
     TAG_STRING(NEAT_TAG_DESTINATION_IP_ADDRESS),
     TAG_STRING(NEAT_TAG_PRIORITY),
+    TAG_STRING(NEAT_TAG_FLOW_GROUP),
 };
 
 //Intiailize the OS-independent part of the context, and call the OS-dependent
@@ -1420,6 +1421,7 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port,
           struct neat_tlv optional[], unsigned int opt_count)
 {
     int stream_count = 1;
+    int group = 0;
     // const char *local_name = NULL;
 
     neat_log(NEAT_LOG_DEBUG, "%s", __func__);
@@ -1431,6 +1433,7 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port,
 
     HANDLE_OPTIONAL_ARGUMENTS_START()
         OPTIONAL_INTEGER(NEAT_TAG_STREAM_COUNT, stream_count)
+        OPTIONAL_INTEGER(NEAT_TAG_FLOW_GROUP, group)
         // OPTIONAL_STRING(NEAT_TAG_LOCAL_NAME, local_name)
     HANDLE_OPTIONAL_ARGUMENTS_END();
 
@@ -1443,6 +1446,7 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port,
     flow->port = port;
     flow->propertyAttempt = flow->propertyMask;
     flow->stream_count = stream_count;
+    flow->group = group;
 
     return neat_he_lookup(mgr, flow, he_connected_cb);
 }
@@ -2888,6 +2892,7 @@ neat_flow *neat_new_flow(neat_ctx *mgr)
     rv->listenfx = neat_listen;
     rv->shutdownfx = neat_shutdown_via_kernel;
     rv->buffer_count = 0;
+    rv->group = 0;
 #if defined(USRSCTP_SUPPORT)
     rv->sock = NULL;
     rv->acceptusrsctpfx = neat_accept_via_usrsctp;
