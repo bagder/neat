@@ -282,7 +282,7 @@ struct neat_resolver_res {
 // Linked list passed to HE after the first PM call.
 // The list contains each candidate HE should get resolved.
 struct neat_he_candidate {
-    const char *dst_address;
+    char *dst_address;
     struct sockaddr_storage dst_sockaddr;
     socklen_t dst_len;
 

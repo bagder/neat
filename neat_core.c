@@ -1883,6 +1883,13 @@ neat_candidates_fallback(neat_ctx *ctx, neat_flow *flow,
     }
 
     neat_he_open(flow->ctx, flow, candidates, he_connected_cb);
+
+#if 0
+    // Deallocation test
+    neat_free_flow(flow);
+    neat_core_cleanup(ctx);
+    exit(0);
+#endif
 }
 
 static void
@@ -1957,7 +1964,7 @@ fallback_resolve_cb(struct neat_resolver_results *results, uint8_t code,
         candidate->if_name     = strdup(iface);
         candidate->if_idx      = result->if_idx;
         assert(candidate->if_name);
-        candidate->dst_address = flow->name;
+        candidate->dst_address = strdup(flow->name);
         candidate->port        = flow->port;
 
         candidate->dst_len     = result->src_addr_len;
@@ -1981,7 +1988,7 @@ static void
 neat_free_candidate(struct neat_he_candidate *candidate)
 {
     assert(candidate);
-    free((void*)candidate->dst_address);
+    free(candidate->dst_address);
     free(candidate->src_address);
     free(candidate->if_name);
     json_decref(candidate->properties);
@@ -2044,6 +2051,7 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port,
     neat_resolve(mgr->resolver, AF_UNSPEC, flow->name, flow->port,
                  fallback_resolve_cb, flow);
 #endif
+    json_decref(address);
     return NEAT_OK;
 }
 
