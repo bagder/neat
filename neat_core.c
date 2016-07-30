@@ -67,6 +67,7 @@ static void neat_sctp_init_events(struct socket *sock);
 #else
 static void neat_sctp_init_events(int sock);
 #endif
+static void neat_free_candidate(struct neat_he_candidate *candidate);
 
 static neat_flow * do_accept(neat_ctx *ctx, neat_flow *flow);
 neat_flow * neat_find_flow(neat_ctx *, struct sockaddr *, struct sockaddr *);
@@ -1828,80 +1829,163 @@ send_properties_to_pm(neat_ctx *ctx, neat_flow *flow)
  * available. It exhaustively generates all possible combinations of interface,
  * source address, and protocol.
  */
-static neat_error_code
-neat_candidates_fallback(neat_ctx *ctx, neat_flow *flow)
+static void
+neat_candidates_fallback(neat_ctx *ctx, neat_flow *flow,
+                         struct neat_he_candidates *candidates)
 {
     uint8_t      nr_of_stacks;
-    int          n, s, family;
-    char         host[NI_MAXHOST];
-    unsigned int if_idx;
+    int32_t prio = 0;
+    struct neat_he_candidate *candidate, *tmp;
 
-    struct neat_he_candidates *candidates;
-    struct ifaddrs          *ifaddrs, *ifa;
+    // struct neat_he_candidates *candidates;
     neat_protocol_stack_type stacks[NEAT_STACK_MAX_NUM];
 
     neat_log(NEAT_LOG_DEBUG, "%s", __func__);
 
     nr_of_stacks = neat_property_translate_protocols(flow->propertyMask, stacks);
-    if (nr_of_stacks == 0)
-        return NEAT_ERROR_UNABLE;
+    assert(nr_of_stacks);
 
-    if ((candidates = calloc(1, sizeof(*candidates))) == NULL) {
-        return NEAT_ERROR_INTERNAL;
-    }
+    // For each candidate in the list we get as input, make nr_of_stacks copies
+    // of it, one for each available stack.
+    TAILQ_FOREACH_SAFE(candidate, candidates, next, tmp) {
+        if (candidate->stack != 0)
+            break;
 
-    TAILQ_INIT(candidates);
+        for (unsigned int i = 0; i < nr_of_stacks; ++i) {
+            struct neat_he_candidate *c = calloc(1, sizeof(*c));
+            if (!c)
+                return;
 
-    if (getifaddrs(&ifaddrs) < 0) {
-        neat_log(NEAT_LOG_DEBUG, "getifaddrs: %s", strerror(errno));
-        return NEAT_ERROR_INTERNAL;
-    }
+            c->dst_address = strdup(candidate->dst_address);
+            assert(c->dst_address);
+            c->src_address = strdup(candidate->src_address);
+            assert(c->src_address);
+            c->dst_len     = candidate->dst_len;
+            c->src_len     = candidate->src_len;
+            c->stack       = stacks[i];
+            c->priority    = prio++;
+            c->if_idx      = candidate->if_idx;
+            c->if_name     = strdup(candidate->if_name);
+            assert(c->if_name);
+            c->family      = candidate->family;
+            c->port        = candidate->port;
+            c->properties  = flow->properties;
+            json_incref(flow->properties);
 
-    for (ifa = ifaddrs, n = 0; ifa != NULL; ifa = ifa->ifa_next, n++) {
-        if (ifa->ifa_addr == NULL)
-            continue;
+            memcpy(&c->dst_sockaddr, &candidate->dst_sockaddr, candidate->dst_len);
+            memcpy(&c->src_sockaddr, &candidate->src_sockaddr, candidate->src_len);
 
-        family = ifa->ifa_addr->sa_family;
-
-        if (family == AF_INET || family == AF_INET6) {
-            s = getnameinfo(ifa->ifa_addr,
-                            (family == AF_INET) ? sizeof(struct sockaddr_in) :
-                            sizeof(struct sockaddr_in6),
-                            host, NI_MAXHOST,
-                            NULL, 0, NI_NUMERICHOST);
-            if (s != 0) {
-                neat_log(NEAT_LOG_DEBUG, "getnameinfo() failed: %s\n",
-                         gai_strerror(s));
-                exit(EXIT_FAILURE);
-            }
-
-            if_idx = if_nametoindex(ifa->ifa_name);
-            if (!if_idx)
-                continue;
-
-            for (unsigned int i = 0; i < nr_of_stacks; ++i) {
-                struct neat_he_candidate *candidate = calloc(1, sizeof(*candidate));
-                if (!candidate)
-                    return NEAT_ERROR_INTERNAL;
-
-                candidate->src_address = strdup(host);
-                candidate->if_name     = strdup(ifa->ifa_name);
-                candidate->dst_address = flow->name;
-                candidate->port        = flow->port;
-                candidate->stack       = stacks[i];
-                candidate->if_idx      = if_idx;
-                candidate->family      = family;
-
-                TAILQ_INSERT_TAIL(candidates, candidate, next);
-            }
+            TAILQ_INSERT_TAIL(candidates, c, next);
         }
-    }
 
-    freeifaddrs(ifaddrs);
+        TAILQ_REMOVE(candidates, TAILQ_FIRST(candidates), next);
+        neat_free_candidate(candidate);
+    }
 
     neat_he_open(flow->ctx, flow, candidates, he_connected_cb);
+}
 
-    return NEAT_OK;
+static void
+fallback_resolve_cb(struct neat_resolver_results *results, uint8_t code,
+                  void *user_data)
+{
+    struct neat_flow *flow = user_data;
+    struct neat_ctx *ctx = flow->ctx;
+    struct neat_resolver_res *result;
+    struct neat_he_candidates *candidates;
+    struct neat_he_candidate *tmp;
+
+    NEAT_FUNC_TRACE();
+
+    if (code != NEAT_RESOLVER_OK) {
+        neat_io_error(ctx, flow, NEAT_INVALID_STREAM, code);
+        return;
+    }
+
+    assert(flow);
+    assert(ctx);
+    assert (results->lh_first);
+
+    candidates = calloc(1, sizeof(*candidates));
+    assert(candidates);
+    TAILQ_INIT(candidates);
+
+    LIST_FOREACH(result, results, next_res) {
+        char dst_buffer[NI_MAXHOST];
+        char src_buffer[NI_MAXHOST];
+        char iface[IF_NAMESIZE];
+        char *iface_ptr;
+        int rc;
+        struct neat_he_candidate *candidate = calloc(1, sizeof(*candidate));
+        assert(candidate);
+
+        rc = getnameinfo((struct sockaddr *)&result->dst_addr,
+                         result->dst_addr_len,
+                         dst_buffer, sizeof(dst_buffer), NULL, 0, NI_NUMERICHOST);
+
+        if (rc != 0) {
+            neat_log(NEAT_LOG_DEBUG, "getnameinfo() failed: %s\n",
+                     gai_strerror(rc));
+            continue;
+        }
+
+        rc = getnameinfo((struct sockaddr *)&result->src_addr,
+                         result->src_addr_len,
+                         src_buffer, sizeof(src_buffer), NULL, 0, NI_NUMERICHOST);
+
+        if (rc != 0) {
+            neat_log(NEAT_LOG_DEBUG, "getnameinfo() failed: %s\n",
+                     gai_strerror(rc));
+            continue;
+        }
+
+        // This ensures we use only one address from each address family for
+        // each interface to reduce the number of candidates.
+        TAILQ_FOREACH(tmp, candidates, next) {
+            if (tmp->if_idx == result->if_idx && tmp->family == result->ai_family)
+                goto skip;
+        }
+
+        iface_ptr = if_indextoname(result->if_idx, iface);
+
+        if (iface_ptr == NULL)
+            continue;
+
+        candidate->family      = result->ai_family;
+        candidate->src_address = strdup(src_buffer);
+        assert(candidate->src_address);
+        candidate->if_name     = strdup(iface);
+        candidate->if_idx      = result->if_idx;
+        assert(candidate->if_name);
+        candidate->dst_address = flow->name;
+        candidate->port        = flow->port;
+
+        candidate->dst_len     = result->src_addr_len;
+        candidate->src_len     = result->dst_addr_len;
+        memcpy(&candidate->src_sockaddr, &result->src_addr, result->src_addr_len);
+        memcpy(&candidate->dst_sockaddr, &result->dst_addr, result->dst_addr_len);
+
+        TAILQ_INSERT_TAIL(candidates, candidate, next);
+
+        neat_log(NEAT_LOG_DEBUG, "[%s] %s -> %s", iface, src_buffer, dst_buffer);
+        continue;
+skip:
+        neat_log(NEAT_LOG_DEBUG, "[%s] %s -> %s (skipped)", iface, src_buffer, dst_buffer);
+        continue;
+    }
+
+    neat_candidates_fallback(ctx, flow, candidates);
+}
+
+static void
+neat_free_candidate(struct neat_he_candidate *candidate)
+{
+    assert(candidate);
+    free((void*)candidate->dst_address);
+    free(candidate->src_address);
+    free(candidate->if_name);
+    json_decref(candidate->properties);
+    free(candidate);
 }
 
 void
@@ -1909,11 +1993,7 @@ neat_free_candidates(struct neat_he_candidates *candidates)
 {
     struct neat_he_candidate *candidate, *tmp;
     TAILQ_FOREACH_SAFE(candidate, candidates, next, tmp) {
-        free((void*)candidate->dst_address);
-        free(candidate->src_address);
-        free(candidate->if_name);
-        json_decref(candidate->properties);
-        free(candidate);
+        neat_free_candidate(candidate);
     }
 
     free(candidates);
@@ -1952,10 +2032,17 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port,
     json_t *address = json_pack("{ss}", "value", name);
     json_object_set(flow->properties, "domain_name", address);
 
+    if (!mgr->resolver)
+        mgr->resolver = neat_resolver_init(mgr, "/etc/resolv.conf");
+
+    if (!mgr->pvd)
+        mgr->pvd = neat_pvd_init(mgr);
 #if 0
     send_properties_to_pm(mgr, flow);
 #else
-    neat_candidates_fallback(mgr, flow);
+    // neat_candidates_fallback(mgr, flow);
+    neat_resolve(mgr->resolver, AF_UNSPEC, flow->name, flow->port,
+                 fallback_resolve_cb, flow);
 #endif
     return NEAT_OK;
 }

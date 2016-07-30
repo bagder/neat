@@ -205,6 +205,9 @@ neat_he_open(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates *candidat
         case NEAT_STACK_SCTP:
             proto = "SCTP";
             break;
+        case NEAT_STACK_SCTP_UDP:
+            proto = "SCTP/UDP";
+            break;
         case NEAT_STACK_UDPLITE:
             proto = "UDPLite";
             break;

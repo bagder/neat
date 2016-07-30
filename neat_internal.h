@@ -283,7 +283,13 @@ struct neat_resolver_res {
 // The list contains each candidate HE should get resolved.
 struct neat_he_candidate {
     const char *dst_address;
+    struct sockaddr_storage dst_sockaddr;
+    socklen_t dst_len;
+
     char       *src_address;
+    struct sockaddr_storage src_sockaddr;
+    socklen_t src_len;
+
     int32_t     stack;
     uint8_t     family;
     uint16_t    port;
