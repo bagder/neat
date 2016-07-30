@@ -2,6 +2,7 @@
 #################################################
 LIST(APPEND neat_programs
     client.c
+    client_json.c
     client_multi.c
     client_http_get.c
     client_https_get.c
