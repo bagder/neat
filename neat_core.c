@@ -2231,6 +2231,11 @@ int neat_base_stack(neat_protocol_stack_type stack)
 static int
 neat_connect(struct he_cb_ctx *he_ctx, uv_poll_cb callback_fx)
 {
+#if defined(__FreeBSD__) && defined(FLOW_GROUPS)
+    int group;
+    int prio;
+    const char *algo;
+#endif
     int enable = 1, retval;
     socklen_t len = 0;
     int size = 0, protocol;
@@ -2297,7 +2302,26 @@ neat_connect(struct he_cb_ctx *he_ctx, uv_poll_cb callback_fx)
         he_ctx->readSize = 0;
     }
 
-    setsockopt(he_ctx->fd, IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(int));
+    if (setsockopt(he_ctx->fd, IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(int))) {
+	    neat_log(NEAT_LOG_DEBUG, "Unable to set TCP_NODELAY: %s", strerror(errno));
+    }
+
+#if defined(__FreeBSD__) && defined(FLOW_GROUPS)
+    group = he_ctx->flow->group;
+    if (setsockopt(he_ctx->fd, IPPROTO_TCP, 8192 /* Group ID */, &group, sizeof(int)) != 0) {
+	    neat_log(NEAT_LOG_DEBUG, "Unable to set flow group: %s", strerror(errno));
+    }
+
+    prio = 4;
+    if (setsockopt(he_ctx->fd, IPPROTO_TCP, 4096 /* Priority */, &prio, sizeof(int)) != 0) {
+	    neat_log(NEAT_LOG_DEBUG, "Unable to set flow priority: %s", strerror(errno));
+    }
+
+    algo = "newreno_afse";
+    if (setsockopt(he_ctx->fd, IPPROTO_TCP, TCP_CONGESTION, algo, strlen(algo)) != 0) {
+	    neat_log(NEAT_LOG_DEBUG, "Unable to set flow priority: %s", strerror(errno));
+    }
+#endif
 
 #if 0
     switch (he_ctx->candidate->ai_stack) {
