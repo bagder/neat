@@ -1,2 +1,6 @@
 {
+    "transport": [
+        {"value": "UDP", "precedence":1, "banned": true},
+        {"value": "UDPLite", "precedence":1, "banned": true}
+    ]
 }

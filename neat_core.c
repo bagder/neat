@@ -1893,7 +1893,7 @@ static void
 neat_candidates_fallback(neat_ctx *ctx, neat_flow *flow,
                          struct neat_he_candidates *candidates)
 {
-    uint8_t      nr_of_stacks;
+    size_t      nr_of_stacks;
     int32_t prio = 0;
     struct neat_he_candidate *candidate, *tmp;
 
@@ -1902,7 +1902,12 @@ neat_candidates_fallback(neat_ctx *ctx, neat_flow *flow,
 
     neat_log(NEAT_LOG_DEBUG, "%s", __func__);
 
+#if 0
+    nr_of_stacks = NEAT_STACK_MAX_NUM;
+    neat_find_enabled_stacks(flow->properties, stacks, &nr_of_stacks, NULL);
+#else
     nr_of_stacks = neat_property_translate_protocols(flow->propertyMask, stacks);
+#endif
     assert(nr_of_stacks);
 
     // For each candidate in the list we get as input, make nr_of_stacks copies
@@ -2293,9 +2298,10 @@ accept_resolve_cb(struct neat_resolver_results *results,
 {
     int sctp_udp_encaps = 0;
     struct neat_pollable_socket *sctp_socket = NULL;
-    uint8_t nr_of_stacks = 0;
+    size_t nr_of_stacks = 0;
     unsigned int socket_count = 0;
     neat_protocol_stack_type stacks[NEAT_STACK_MAX_NUM];
+    int precedences[NEAT_STACK_MAX_NUM];
     neat_flow *flow = user_data;
     struct neat_ctx *ctx = flow->ctx;
     neat_log(NEAT_LOG_DEBUG, "%s", __func__);
@@ -2316,7 +2322,12 @@ accept_resolve_cb(struct neat_resolver_results *results,
 
     // Hack until we support listening for multiple protocols (again?)
     // Assume that a transport protocol is specified with NEAT_PROPERTY_*_REQUIRED
+#if 1
+    nr_of_stacks = NEAT_STACK_MAX_NUM;
+    neat_find_enabled_stacks(flow->properties, stacks, &nr_of_stacks, precedences);
+#else
     nr_of_stacks = neat_property_translate_protocols(flow->propertyAttempt, stacks);
+#endif
     assert(nr_of_stacks > 0);
 
     flow->resolver_results = results;
@@ -2358,6 +2369,10 @@ accept_resolve_cb(struct neat_resolver_results *results,
                                            socket_type);
 
             if (fd == -1) {
+                if (precedences[i] == 2) {
+                    neat_io_error(ctx, flow, NEAT_ERROR_UNABLE);
+                    return;
+                }
                 continue;
             }
             listen_socket = malloc(sizeof(*listen_socket));
@@ -2383,6 +2398,12 @@ accept_resolve_cb(struct neat_resolver_results *results,
 
             if (neat_listen_via_usrsctp(ctx, flow, listen_socket) != 0) {
                 free(listen_socket);
+
+                if (precedence[i] == 2) {
+                    neat_io_error(ctx, flow, NEAT_ERROR_UNABLE);
+                    return;
+                }
+
                 continue;
             }
             fd = -1;
@@ -2394,6 +2415,11 @@ accept_resolve_cb(struct neat_resolver_results *results,
                                        socket_type);
 
         if (fd == -1) {
+            if (precedences[i] == 2) {
+                neat_io_error(ctx, flow, NEAT_ERROR_UNABLE);
+                return;
+            }
+
             continue;
         }
 
