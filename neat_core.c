@@ -2356,11 +2356,7 @@ accept_resolve_cb(struct neat_resolver_results *results,
                 continue;
         } else if (stacks[i] == NEAT_STACK_SCTP && sctp_socket != NULL) {
             continue;
-        } else if (stacks[i] == NEAT_STACK_UDPLITE) {
-            // TODO: Enable UDPLite on platforms that support it
-            continue;
         }
-
 #ifdef USRSCTP_SUPPORT
         if (stacks[i] != NEAT_STACK_SCTP) {
             fd = neat_listen_via_kernel(ctx, flow, stacks[i],
