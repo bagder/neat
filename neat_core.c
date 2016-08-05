@@ -1739,10 +1739,10 @@ on_candidate_resolved(struct neat_resolver_results *results,
 
     if (code == NEAT_RESOLVER_TIMEOUT)  {
         *data->status = -1;
-        neat_io_error(flow->ctx, flow, NEAT_INVALID_STREAM, NEAT_ERROR_IO);
+        neat_io_error(flow->ctx, flow, NEAT_ERROR_IO);
     } else if ( code == NEAT_RESOLVER_ERROR ) {
         *data->status = -1;
-        neat_io_error(flow->ctx, flow, NEAT_INVALID_STREAM, NEAT_ERROR_IO);
+        neat_io_error(flow->ctx, flow, NEAT_ERROR_IO);
     }
 
     if (!--*data->remaining /*&& *data->status == 0*/) {
@@ -1965,7 +1965,7 @@ fallback_resolve_cb(struct neat_resolver_results *results, uint8_t code,
     NEAT_FUNC_TRACE();
 
     if (code != NEAT_RESOLVER_OK) {
-        neat_io_error(ctx, flow, NEAT_INVALID_STREAM, code);
+        neat_io_error(ctx, flow, code);
         return;
     }
 
