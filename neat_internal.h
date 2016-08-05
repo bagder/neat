@@ -74,6 +74,7 @@ struct neat_ctx
 };
 
 struct he_cb_ctx;
+struct neat_pollable_socket;
 
 typedef struct neat_ctx neat_ctx;
 typedef neat_error_code (*neat_read_impl)(struct neat_ctx *ctx, struct neat_flow *flow,
@@ -83,7 +84,7 @@ typedef neat_error_code (*neat_write_impl)(struct neat_ctx *ctx, struct neat_flo
                                            const unsigned char *buffer, uint32_t amt, struct neat_tlv optional[], unsigned int opt_count);
 typedef int (*neat_accept_impl)(struct neat_ctx *ctx, struct neat_flow *flow, int fd);
 #if defined(USRSCTP_SUPPORT)
-typedef struct socket * (*neat_accept_usrsctp_impl)(struct neat_ctx *ctx, struct neat_flow *flow, struct socket *sock);
+typedef struct socket * (*neat_accept_usrsctp_impl)(struct neat_ctx *ctx, struct neat_flow *flow, struct neat_pollable_socket *listen_socket);
 #endif
 typedef int (*neat_connect_impl)(struct he_cb_ctx *he_ctx, uv_poll_cb callback_fx);
 typedef int (*neat_listen_impl)(struct neat_ctx *ctx, struct neat_flow *flow);
@@ -142,12 +143,32 @@ struct neat_iofilter
     neat_filter_read_impl  readfx;
 };
 
+struct neat_pollable_socket
+{
+    struct neat_flow *flow;
+
+#if defined(USRSCTP_SUPPORT)
+    struct socket *usrsctp_socket;
+#endif
+
+    int fd;
+    uint8_t family;
+    int type;
+    int stack;
+
+    struct sockaddr srcAddr;
+    struct sockaddr dstAddr;
+
+    uv_poll_t *handle;
+
+    TAILQ_ENTRY(neat_pollable_socket) next;
+};
+
 struct neat_flow
 {
-#if defined(USRSCTP_SUPPORT)
-    struct socket *sock;
-#endif
-    int fd;
+    // Main socket used for communication, not listening
+    struct neat_pollable_socket *socket;
+    TAILQ_HEAD(neat_listen_socket_head, neat_pollable_socket) listen_sockets;
     struct neat_flow_operations *operations; // see ownedByCore flag
     const char *name;
     char *server_pem;
@@ -155,17 +176,13 @@ struct neat_flow
     uint64_t propertyMask;
     uint64_t propertyAttempt;
     uint64_t propertyUsed;
-    uint8_t family;
-    int sockType;
-    int sockStack;
     uint16_t stream_count;
     struct neat_resolver_results *resolver_results;
     const struct sockaddr *sockAddr; // raw unowned pointer into resolver_results
-	struct sockaddr srcAddr;
-	struct sockaddr dstAddr;
     struct neat_ctx *ctx; // raw convenience pointer
-    uv_poll_t *handle;
     struct neat_iofilter *iofilters;
+
+    // TODO: Move more socket-specific values to neat_pollable_socket
 
     size_t writeLimit;  // maximum to write if the socket supports partial writes
     size_t writeSize;   // send buffer size
@@ -350,8 +367,7 @@ uint8_t neat_resolve(struct neat_resolver *resolver,
 void neat_resolver_update_timeouts(struct neat_resolver *resolver, uint16_t t1,
         uint16_t t2);
 
-void neat_io_error(neat_ctx *ctx, neat_flow *flow, int stream,
-                   neat_error_code code);
+void neat_io_error(neat_ctx *ctx, neat_flow *flow, neat_error_code code);
 
 struct neat_iofilter *insert_neat_iofilter(neat_ctx *ctx, neat_flow *flow);
 
