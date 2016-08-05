@@ -2,115 +2,164 @@
 #include "neat_json_helpers.h"
 
 #include <assert.h>
+#include <string.h>
 
 #define NEAT_TRANSPORT_PROPERTY(name, propname, protonum)		\
 {									\
     #name,								\
-    propname,							\
     protonum							\
 }
 
 #define NEAT_TRANSPORT(name) \
 { \
     #name, \
-    "transport_" #name, \
     NEAT_STACK_ ## name \
 }
 
 struct neat_transport_property {
     const char *name;
-    const char *property_name;
     neat_protocol_stack_type stack;
 };
 
-static struct neat_transport_property transports[] = {
+static struct neat_transport_property neat_transports[] = {
     NEAT_TRANSPORT(TCP),
     NEAT_TRANSPORT(SCTP),
     NEAT_TRANSPORT(UDP),
-    {"UDPlite", "transport_UDPlite", NEAT_STACK_UDPLITE},
+    {"UDPlite", NEAT_STACK_UDPLITE},
+    {"UDPLite", NEAT_STACK_UDPLITE},
+    {"UDP-Lite", NEAT_STACK_UDPLITE},
+    {"UDP-lite", NEAT_STACK_UDPLITE},
+    {"UDPLITE", NEAT_STACK_UDPLITE},
+    {"SCTP/UDP", NEAT_STACK_SCTP_UDP},
 };
 
-/* Not very efficient, but it does the job.
- */
-static void
-find_protocols_for_precedence(json_t *json, neat_protocol_stack_type *stacks,
-                       size_t *stack_count, long long precedence)
+static inline neat_protocol_stack_type
+string_to_stack(const char* str)
 {
-    // TODO: How do we check if a platform/compiler supports long long?
-    // TODO: Use long instead of long long for said platforms
-
-    size_t index = 0;
-    long long prec;
-    json_t *transport, *obj;
-
-    if (*stack_count == NEAT_MAX_NUM_PROTO)
-        return;
-
-    for (int i = 0; i < NEAT_MAX_NUM_PROTO; ++i) {
-        if ((transport = json_object_get(json, transports[i].property_name)) != NULL) {
-
-            if ((obj = json_object_get(transport, "precedence")) == NULL) {
-                neat_log(NEAT_LOG_DEBUG,
-                         "Missing \"precedence\" in key %s, ignoring",
-                         transports[i].property_name);
-                continue;
-            }
-
-            if (json_typeof(obj) != JSON_INTEGER) {
-                neat_log(NEAT_LOG_DEBUG,
-                         "\"precedence\" in key %s specified as something else than an integer, ignoring",
-                         transports[i].property_name);
-                continue;
-            }
-
-            // If the precedence is different from what we're looking for, skip
-            prec = json_integer_value(obj);
-            if (prec != precedence)
-                continue;
-
-            // Disallow more than one immutable transport
-            // The PM should ensure this won't happen
-            assert(precedence != 2 || index == 0);
-
-            stacks[(*stack_count)++] = transports[i].stack;
-
-            if (*stack_count == NEAT_MAX_NUM_PROTO)
-                return;
+    for (size_t i = 0; i < sizeof(neat_transports) / sizeof(*neat_transports); ++i) {
+        if (strcmp(str, neat_transports[i].name) == 0) {
+            return neat_transports[i].stack;
         }
     }
+
+    return 0;
 }
 
-/* Find the enabled transport protocols within a JSON object.
+
+/*
+ * Parse the json structure to discover which protocols are enabled.
  *
- * Returns the enabled transport protocols in `stacks` and the number of
- * enabled transport protocols.
+ * There are four modes:
+ * 1. One and only one protocol with precendece == 2
+ * 2. Some protocols with precendece == 2, some protocols with precedence == 1
+ * 3. Multiple protocols with precedence == 1
+ * 4. All protocols listed are banned
  *
- * The returned array is ordered on precedence.
+ * A pointer to an array of ints must be given for mode 2. This mode is intended
+ * for listening sockets only. Errors will be reported when a protocol has
+ * precedence == 2, otherwise the error will be silently ignored. In mode 4,
+ * all protocols will be assumed to have precedence 1.
+ *
+ * TODO: Contemplate whether this can be written better somehow.
  */
 void
-find_enabled_protocols(json_t *json, neat_protocol_stack_type *stacks,
-                       size_t *stack_count)
+neat_find_enabled_stacks(json_t *json, neat_protocol_stack_type *stacks,
+                    size_t *stack_count, int *precedences)
 {
-    NEAT_FUNC_TRACE();
+    json_t *transports, *transport;
+    size_t i;
+    neat_protocol_stack_type *stack_ptr = stacks;
+    neat_protocol_stack_type banned[NEAT_STACK_MAX_NUM];
+    neat_protocol_stack_type *banned_ptr = banned;
+    size_t count = 0;
+    size_t ban_count = 0;
 
+    assert(json);
     assert(stacks && stack_count);
-    // assert(*stack_count >= NEAT_MAX_NUM_PROTO);
+    assert(*stack_count >= NEAT_MAX_NUM_PROTO);
 
-    *stack_count = 0;
+    transports = json_object_get(json, "transport");
 
-    // Missing a transport protocol in the array above?
-    assert(sizeof(transports) / sizeof(transports[0]) == NEAT_MAX_NUM_PROTO);
+    json_array_foreach(transports, i, transport) {
+        int precedence = json_integer_value(json_object_get(transport, "precedence"));
+        const char* value;
+        json_t* val;
+        neat_protocol_stack_type stack;
 
-    // Pass 1: Find any mandatory (immutable) transport protocols
-    find_protocols_for_precedence(json, stacks, stack_count, 2);
+        val = json_object_get(transport, "value");
+        assert(val);
+        assert(json_typeof(val) == JSON_STRING);
+        value = json_string_value(val);
 
-    // Already found a transport protocol
-    if (*stack_count)
-        return;
+        if (precedence == 2) {
+            // Don't specify more than one transport if you have precedence == 2,
+            // unless it's for listening sockets
+            assert(json_array_size(transports) == 1 || precedences);
 
-    // Pass 2: Find any requested transport protocols
-    find_protocols_for_precedence(json, stacks, stack_count, 1);
+            if ((stack = string_to_stack(value)) != 0) {
+                *stacks = stack;
+                count++;
 
-    // Pass 3: Find any remaining transport protocols
-    find_protocols_for_precedence(json, stacks, stack_count, 0);
+                if (precedences) {
+                    *(precedences++) = precedence;
+                } else {
+                    *stack_count = count;
+                    return;
+                }
+
+            } else {
+                neat_log(NEAT_LOG_DEBUG, "Unknown transport %s", value);
+                *stack_count = 0;
+            }
+
+            if (!precedences)
+                return;
+        } else if (precedence == 1) {
+            int b;
+
+            val = json_object_get(transport, "banned");
+            b = json_boolean_value(val);
+
+            if ((stack = string_to_stack(value)) != 0) {
+                if (val && b) {
+                    *(banned_ptr++) = stack;
+                    ban_count++;
+                    continue;
+                } else {
+                    *(stack_ptr++) = stack;
+                    count++;
+                    if (precedences) {
+                        *(precedences++) = precedence;
+                    }
+                }
+            } else {
+                neat_log(NEAT_LOG_DEBUG, "Unknown transport %s", value);
+            }
+
+        } else {
+            neat_log(NEAT_LOG_ERROR, "Invalid precedence %d in JSON", precedence);
+            *stack_count = 0;
+            return;
+        }
+    }
+
+    // If only banned protocols are specified
+    if (ban_count > 0 && count == 0) {
+        // Add all known protocols, except those that are banned...
+        for (size_t i = 0; i < sizeof(neat_transports) / sizeof(*neat_transports); ++i) {
+            for (size_t j = 0; j < ban_count; ++j) {
+                if (neat_transports[i].stack == banned[j])
+                    goto skip;
+            }
+
+            *(stack_ptr++) = neat_transports[i].stack;
+            count++;
+            if (precedences)
+                *(precedences++) = 1;
+skip:
+            continue;
+        }
+    }
+
+    *stack_count = count;
 }
