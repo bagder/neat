@@ -52,7 +52,9 @@ def dict_to_properties(property_dict):
 def json_to_properties(json_str):
     """ Import a list of JSON encoded properties
 
-    example: json_to_properties('{"foo":{"value":"bar", "precedence":0}}')
+    Return a list of NEAT PropertyArray objects if json_str is an array. Convert to array otherwise.
+
+    example: json_to_properties('[{"foo":{"value":"bar", "precedence":0}}]')
 
     """
     try:
@@ -61,7 +63,12 @@ def json_to_properties(json_str):
         logging.error(json_str + ' is not a valid JSON string: ' + str(e))
         raise InvalidPropertyError('invalid JSON string: ' + str(e))
 
-    property_array_list=[]
+    property_array_list = []
+
+    if not isinstance(property_dict, list):
+        property_dict = [property_dict]
+        logging.warning("received JSON string is not an array")
+
     for pa in property_dict:
         property_array_list.append(dict_to_properties(pa))
     return property_array_list
@@ -300,9 +307,9 @@ class PropertyArray(dict):
                 else:
                     self[property.key] = property
             else:
-                logging.error("only NEATProperty objects may be added to PropertyDict: received %s instead" % type(property))
+                logging.error(
+                    "only NEATProperty objects may be added to PropertyDict: received %s instead" % type(property))
                 raise NEATPropertyError("cannot add %s" % type(property))
-
 
     def __add__(self, other):
         diff = self ^ other

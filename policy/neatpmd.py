@@ -27,11 +27,11 @@ def process_request(json_str, num_candidates=10):
 
     candidates = []
     requests = []
-
     try:
         properties_list = policy.json_to_properties(json_str)
     except policy.InvalidPropertyError:
         return
+
 
     try:
         for req in properties_list:
@@ -60,6 +60,7 @@ def process_request(json_str, num_candidates=10):
 
     candidates.sort(key=attrgetter('score'), reverse=True)
     logging.info("%d candidates generated" % len(candidates))
+
     for candidate in candidates:
         print(candidate, candidate.score)
     # TODO check if candidates contain the minimum src/dst/transport tuple
