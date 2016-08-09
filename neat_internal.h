@@ -299,21 +299,30 @@ struct neat_resolver_res {
 // Linked list passed to HE after the first PM call.
 // The list contains each candidate HE should get resolved.
 struct neat_he_candidate {
-    char *dst_address;
+    char                    *dst_address;
     struct sockaddr_storage dst_sockaddr;
-    socklen_t dst_len;
+    socklen_t               dst_len;
 
-    char       *src_address;
+    char                    *src_address;
     struct sockaddr_storage src_sockaddr;
-    socklen_t src_len;
+    socklen_t               src_len;
 
-    int32_t     stack;
-    uint8_t     family;
-    uint16_t    port;
-    uint32_t    if_idx;
-    char       *if_name;
-    int32_t     priority;
-    json_t     *properties;
+    int32_t  stack;
+    uint8_t  family;
+    uint16_t port;
+    uint32_t if_idx;
+    char     *if_name;
+    int32_t  priority;
+    json_t   *properties;
+
+    uv_poll_t       *handle;
+    struct neat_ctx *ctx;
+    neat_flow       *flow;
+    int             fd;
+#if defined(USRSCTP_SUPPORT)
+    struct socket   *sock;
+#endif
+    int32_t         sock_type;
 
     TAILQ_ENTRY(neat_he_candidate) next;
 };

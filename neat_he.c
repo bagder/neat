@@ -251,6 +251,13 @@ neat_he_open(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates *candidat
     // The candidate list should be provided to he_connected_cb so that it may
     // be freed there.
     neat_free_candidates(candidate_list);
+#if 0
+    flow->hefirstConnect = 1;
+    flow->heConnectAttemptCount = 0; 
+    TAILQ_FOREACH(candidate, candidate_list, next) {
+        
+    }
+#endif
 
     return NEAT_ERROR_OK;
 }
