@@ -71,6 +71,8 @@ static void neat_sctp_init_events(struct socket *sock);
 static void neat_sctp_init_events(int sock);
 #endif
 static void neat_free_candidate(struct neat_he_candidate *candidate);
+static void fallback_resolve_cb(struct neat_resolver_results *results, uint8_t code, void *user_data);
+static void on_pm_error(struct neat_ctx *ctx, struct neat_flow *flow, int error);
 
 static neat_flow * do_accept(neat_ctx *ctx, neat_flow *flow, struct neat_pollable_socket *socket);
 neat_flow * neat_find_flow(neat_ctx *, struct sockaddr *, struct sockaddr *);
@@ -1711,7 +1713,7 @@ on_candidates_resolved(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates
 #else
     neat_log(NEAT_LOG_DEBUG, "Sending post-resolve properties to PM");
 #endif
-    neat_pm_send(flow->ctx, flow, buffer, on_pm_reply_post_resolve);
+    neat_pm_send(flow->ctx, flow, buffer, on_pm_reply_post_resolve, on_pm_error);
 
     json_decref(array);
     neat_free_candidates(candidate_list);
@@ -1854,9 +1856,25 @@ on_pm_reply_pre_resolve(neat_ctx *ctx, neat_flow *flow, json_t *json)
 }
 
 static void
-on_pm_timeout()
+on_pm_error(struct neat_ctx *ctx, struct neat_flow *flow, int error)
 {
-    // TODO: Wire up and implement
+    NEAT_FUNC_TRACE();
+
+    switch (error) {
+        case PM_ERROR_SOCKET_UNAVAILABLE:
+        case PM_ERROR_SOCKET:
+        case PM_ERROR_INVALID_JSON:
+            neat_log(NEAT_LOG_DEBUG, "===== Unable to communicate with PM, using fallback =====");
+            neat_resolve(ctx->resolver, AF_UNSPEC, flow->name, flow->port,
+                         fallback_resolve_cb, flow);
+            break;
+        case PM_ERROR_OOM:
+            break;
+        default:
+            assert(0);
+            break;
+    }
+
 }
 
 static void
@@ -1881,7 +1899,7 @@ send_properties_to_pm(neat_ctx *ctx, neat_flow *flow)
     neat_log(NEAT_LOG_DEBUG, "Sending properties to PM");
 #endif
 
-    neat_pm_send(ctx, flow, buffer, on_pm_reply_pre_resolve);
+    neat_pm_send(ctx, flow, buffer, on_pm_reply_pre_resolve, on_pm_error);
     json_decref(array);
 }
 

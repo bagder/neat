@@ -21,6 +21,7 @@ struct neat_pm_request_data {
     struct neat_ctx *ctx;
     struct neat_flow *flow;
     pm_reply_callback on_pm_reply;
+    pm_error_callback on_pm_error;
     char *output_buffer;
     char *read_buffer;
     size_t buffer_size;
@@ -31,6 +32,7 @@ static void
 on_pm_socket_close(uv_handle_t* handle)
 {
     NEAT_FUNC_TRACE();
+    free(handle->data);
     free(handle);
 }
 
@@ -41,8 +43,6 @@ on_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
 
     NEAT_FUNC_TRACE();
 
-    // assert(nread > 0);
-    // assert(nread != UV_EOF);
     if (nread == UV_EOF) {
         json_t *json;
         json_error_t error;
@@ -57,7 +57,10 @@ on_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
             neat_log(NEAT_LOG_DEBUG, "Error at position %d:", error.position);
             neat_log(NEAT_LOG_DEBUG, error.text);
 
-            // TODO: Handle this error
+            data->on_pm_error(data->ctx, data->flow, PM_ERROR_INVALID_JSON);
+
+            free(data->read_buffer);
+            // free(data);
 
             goto end;
         }
@@ -65,7 +68,7 @@ on_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
         data->on_pm_reply(data->ctx, data->flow, json);
 
         free(data->read_buffer);
-        free(data);
+        // free(data);
 
         goto end;
     }
@@ -92,10 +95,19 @@ end:
 static void
 on_request_alloc(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
 {
+    struct neat_pm_request_data *data = handle->data;
+
     neat_log(NEAT_LOG_DEBUG, "on_request_alloc");
     buf->base = malloc(4096);
     buf->len = 4096;
-    assert(buf->base);
+
+    if (buf->base == NULL) {
+        free(data->read_buffer);
+
+        data->on_pm_error(data->ctx, data->flow, PM_ERROR_OOM);
+
+        // uv_close(handle, on_pm_socket_close);
+    }
 }
 
 static void
@@ -132,11 +144,7 @@ on_pm_connected(uv_connect_t* req, int status)
     if (status < 0) {
         neat_log(NEAT_LOG_DEBUG, "Failed to connect to PM socket");
 
-        /* Exit early if the PM is not running in order to prevent stalling the
-         * buildbot tests.
-         * TODO: Remove once the buildbots are running the PM.
-         */
-        exit(-1);
+        data->on_pm_error(data->ctx, data->flow, PM_ERROR_SOCKET_UNAVAILABLE);
 
         goto error;
     }
@@ -144,6 +152,9 @@ on_pm_connected(uv_connect_t* req, int status)
     // Set non-blocking
     if (uv_stream_set_blocking(req->handle, 0) < 0) {
         neat_log(NEAT_LOG_DEBUG, "Failed to set PM socket as non-blocking");
+
+        data->on_pm_error(data->ctx, data->flow, PM_ERROR_SOCKET);
+
         goto error;
     }
 
@@ -174,7 +185,7 @@ neat_pm_socket_close(struct neat_ctx *ctx, struct neat_flow *flow, uv_stream_t *
 }
 
 neat_error_code
-neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, char *buffer, pm_reply_callback cb)
+neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, char *buffer, pm_reply_callback cb, pm_error_callback err_cb)
 {
     const char *home_dir;
     // char buffer[128];
@@ -197,6 +208,7 @@ neat_pm_send(struct neat_ctx *ctx, struct neat_flow *flow, char *buffer, pm_repl
     data->flow = flow;
     data->output_buffer = buffer;
     data->on_pm_reply = cb;
+    data->on_pm_error = err_cb;
     data->read_buffer = NULL;
     data->buffer_size = 0;
 
