@@ -1692,6 +1692,9 @@ on_candidates_resolved(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates
     TAILQ_FOREACH_SAFE(candidate, candidate_list, next, tmp) {
         json_t *dst_address, *str;
 
+        if (candidate->if_idx == 0 || candidate->dst_address == NULL)
+            continue;
+
         //dst_address = json_pack();
         str = json_string(candidate->dst_address);
         dst_address = json_object();
@@ -1734,19 +1737,63 @@ static void
 on_candidate_resolved(struct neat_resolver_results *results,
                       uint8_t code, void *user_data)
 {
+    struct sockaddr_storage dummy;
+    struct neat_resolver_res *result;
     struct candidate_resolver_data *data = user_data;
+    struct neat_he_candidate *candidate = data->candidate;
     //neat_ctx *ctx = data->ctx;
-    neat_flow *flow = data->flow;
+    // neat_flow *flow = data->flow;
     NEAT_FUNC_TRACE();
 
+    // TODO: Convert this to soft errors instead
     if (code == NEAT_RESOLVER_TIMEOUT)  {
         *data->status = -1;
-        neat_io_error(flow->ctx, flow, NEAT_ERROR_IO);
+        // neat_io_error(flow->ctx, flow, NEAT_ERROR_IO);
     } else if ( code == NEAT_RESOLVER_ERROR ) {
         *data->status = -1;
-        neat_io_error(flow->ctx, flow, NEAT_ERROR_IO);
+        // neat_io_error(flow->ctx, flow, NEAT_ERROR_IO);
     }
 
+#if 0
+    LIST_FOREACH(result, results, next_res) {
+        char namebuf[NI_MAXHOST];
+        assert(candidate->if_idx == result->if_idx);
+        neat_log(NEAT_LOG_DEBUG, "%d %d, %s", result->if_idx, candidate->if_idx, namebuf);
+    }
+#endif
+
+    assert(results->lh_first);
+    result = results->lh_first;
+
+    // The interface index must be the same as the interface index of the candidate
+    if (result->if_idx != candidate->if_idx) {
+        candidate->if_idx = 0;
+        goto skip;
+    }
+
+    char namebuf[NI_MAXHOST];
+    int rc = getnameinfo((struct sockaddr*)&result->dst_addr, result->dst_addr_len, namebuf, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+
+    if (rc != 0) {
+        candidate->dst_address = NULL;
+        goto skip;
+    }
+
+    neat_log(NEAT_LOG_DEBUG, "%s -> %s", candidate->src_address, namebuf);
+    // Check that src/dst addresses are of the same family
+    if (result->ai_family == AF_INET && inet_pton(AF_INET6, candidate->src_address, &dummy) == 1) {
+        candidate->dst_address = NULL;
+        goto skip;
+    }
+
+    if (result->ai_family == AF_INET6 && inet_pton(AF_INET, candidate->src_address, &dummy) == 1) {
+        candidate->dst_address = NULL;
+        goto skip;
+    }
+
+    candidate->dst_address = strdup(namebuf);
+
+skip:
     if (!--*data->remaining /*&& *data->status == 0*/) {
         on_candidates_resolved(data->flow->ctx, data->flow, data->candidate_list);
         free(data->status);
@@ -1781,6 +1828,7 @@ neat_resolve_candidates(neat_ctx *ctx, neat_flow *flow,
         resolver_data = malloc(sizeof(*resolver_data));
 
         resolver_data->candidate_list = candidate_list;
+        resolver_data->candidate = candidate;
         resolver_data->flow = flow;
 
         resolver_data->status = status;
@@ -1843,6 +1891,8 @@ on_pm_reply_pre_resolve(neat_ctx *ctx, neat_flow *flow, json_t *json)
 
         candidate->dst_address = strdup(address);
         candidate->if_name = strdup(interface);
+        candidate->if_idx = if_nametoindex(candidate->if_name);
+        assert(candidate->if_idx);
         candidate->src_address = strdup(local_ip);
         candidate->port = flow->port;
         candidate->properties = value;
@@ -1880,16 +1930,68 @@ on_pm_error(struct neat_ctx *ctx, struct neat_flow *flow, int error)
 static void
 send_properties_to_pm(neat_ctx *ctx, neat_flow *flow)
 {
+    int rc;
+    struct ifaddrs *ifaddrs;
     char *buffer;
-    json_t *array;
+    json_t *array, *props, *endpoints, *eps;
     NEAT_FUNC_TRACE();
 
     assert(ctx);
     assert(flow);
 
     array = json_array();
+    endpoints = json_object();
+    eps = json_array();
+
     assert(array);
-    json_array_append(array, flow->properties);
+    assert(endpoints);
+
+    rc = getifaddrs(&ifaddrs);
+
+    for (struct ifaddrs *ifaddr = ifaddrs; ifaddr != NULL; ifaddr = ifaddr->ifa_next) {
+        socklen_t addrlen;
+        char namebuf[NI_MAXHOST];
+        json_t *obj/*, *family*/;
+
+        // Doesn't actually contain any address (?)
+        if (ifaddr->ifa_addr == NULL) {
+            neat_log(NEAT_LOG_DEBUG, "No addr");
+            continue;
+        }
+
+        if (ifaddr->ifa_addr->sa_family != AF_INET && ifaddr->ifa_addr->sa_family != AF_INET6)
+            continue;
+
+        addrlen = (ifaddr->ifa_addr->sa_family) == AF_INET6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+        rc = getnameinfo(ifaddr->ifa_addr, addrlen, namebuf, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+
+        if (rc != 0) {
+            neat_log(NEAT_LOG_DEBUG, "getnameinfo: %s", gai_strerror(rc));
+            continue;
+        }
+
+        // TODO: Don't do name resolution from link-local addresses
+        if (strncmp(namebuf, "fe80::", 6) == 0) {
+            continue;
+        }
+
+        obj = json_pack("{ss++si}", "value", ifaddr->ifa_name, "|", namebuf, "precedence", 1);
+        assert(obj);
+
+        json_array_append(eps, obj);
+
+        json_decref(obj);
+    }
+
+    freeifaddrs(ifaddrs);
+
+    props = json_copy(flow->properties);
+    // json_object_set(endpoints, "value", eps);
+    json_object_set(props, "endpoints", eps);
+    json_array_append(array, props);
+
+    json_decref(props);
+    json_decref(endpoints);
 
     buffer = json_dumps(array, JSON_INDENT(2));
 
@@ -2047,7 +2149,7 @@ fallback_resolve_cb(struct neat_resolver_results *results, uint8_t code,
         candidate->if_name     = strdup(iface);
         candidate->if_idx      = result->if_idx;
         assert(candidate->if_name);
-        candidate->dst_address = strdup(flow->name);
+        candidate->dst_address = strdup(dst_buffer);
         candidate->port        = flow->port;
 
         candidate->dst_len     = result->src_addr_len;
