@@ -1698,7 +1698,7 @@ on_candidates_resolved(neat_ctx *ctx, neat_flow *flow, struct neat_he_candidates
 
         neat_log(NEAT_LOG_DEBUG, "%s", candidate->dst_address);
         json_object_set(dst_address, "value", str);
-        json_object_set(candidate->properties, "dst_address", dst_address);
+        json_object_set(candidate->properties, "remote_ip", dst_address);
 
         json_array_append(array, candidate->properties);
 
@@ -2127,7 +2127,7 @@ neat_open(neat_ctx *mgr, neat_flow *flow, const char *name, uint16_t port,
 
     if (!mgr->pvd)
         mgr->pvd = neat_pvd_init(mgr);
-#if 0
+#if 1
     send_properties_to_pm(mgr, flow);
 #else
     // neat_candidates_fallback(mgr, flow);
